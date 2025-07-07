@@ -341,7 +341,7 @@ def save_posts_to_database(posts: List[Dict[str, Any]], thread_title: str, threa
     
     insert_data = []
     for post in posts:
-        # 处理 floor 字段，确保是数字类型
+        # 处理 floor 字段，确保是BIGINT兼容的数字类型
         floor_value = post.get('floor')
         if floor_value is not None:
             if isinstance(floor_value, str) and floor_value.isdigit():
@@ -512,32 +512,6 @@ def extract_thread_title(thread_url: str, cookies: dict) -> str:
         print(f"提取标题时发生错误: {e}")
         return thread_url.split('/')[-1] or "未知标题"
 
-
-# 使用示例
-if __name__ == "__main__":
-    # 示例用法
-    sample_cookies = {
-        'session_id': 'your_session_id',
-        # 添加其他必要的cookies
-    }
-    
-    sample_url = "https://simpcity.su/threads/example-thread.123456/"
-    
-    # 完整爬取并存储到数据库
-    result = crawler(
-        thread_url=sample_url,
-        cookies=sample_cookies,
-        thread_title="示例帖子标题",
-        enable_reactions=True,
-        save_to_db=True
-    )
-    
-    print("爬取结果:")
-    print(f"成功: {result['success']}")
-    print(f"总帖子数: {result['total_posts']}")
-    print(f"数据库记录数: {result['db_records']}")
-    if result['error']:
-        print(f"错误: {result['error']}")
 
 
 

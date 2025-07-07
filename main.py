@@ -16,9 +16,9 @@ def main():
     
     # 完整爬取并存储到数据库
     result = crawler(
-        thread_url="https://simpcity.su/threads/whisperaudios-asmr.29151/",
+        thread_url="https://simpcity.su/threads/volcanicblossom-pufffypink.20508",
         cookies=requests_cookies,
-        thread_title="whisperaudios-asmr",
+        thread_title="pufffypink",
         enable_reactions=False,
         save_to_db=True
     )
