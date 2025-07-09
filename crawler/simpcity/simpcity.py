@@ -381,6 +381,53 @@ def save_posts_to_database(posts: List[Dict[str, Any]], thread_title: str, threa
         return 0
 
 
+def extract_thread_title(thread_url: str, cookies: dict) -> str:
+    """
+    从帖子页面提取标题
+    
+    Args:
+        thread_url: 帖子URL
+        cookies: cookies字典
+    
+    Returns:
+        帖子标题，如果提取失败返回默认值
+    """
+    try:
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+        
+        session = requests.Session()
+        session.headers.update(headers)
+        session.cookies.update(cookies)
+        
+        response = session.get(thread_url, timeout=10)
+        response.raise_for_status()
+        
+        soup = BeautifulSoup(response.text, 'html.parser')
+        
+        # 尝试多种方式提取标题
+        title_selectors = [
+            'h1.p-title-value',
+            'h1[data-xf-init="title-tooltip"]',
+            'h1.thread-title',
+            'title'
+        ]
+        
+        for selector in title_selectors:
+            title_tag = soup.select_one(selector)
+            if title_tag:
+                title = title_tag.get_text(strip=True)
+                if title and title != 'title':
+                    return title
+        
+        # 如果都没找到，使用URL作为标题
+        return thread_url.split('/')[-1] or "未知标题"
+        
+    except Exception as e:
+        print(f"提取标题时发生错误: {e}")
+        return thread_url.split('/')[-1] or "未知标题"
+
 def crawler(thread_url: str, cookies: dict, thread_title: Optional[str] = None, 
            enable_reactions: bool = True, save_to_db: bool = True, 
            config_path: str = "config.yaml") -> Dict[str, Any]:
@@ -465,52 +512,351 @@ def crawler(thread_url: str, cookies: dict, thread_title: Optional[str] = None,
         return result
 
 
-def extract_thread_title(thread_url: str, cookies: dict) -> str:
+def sync(thread_url: str, cookies: dict, thread_title: Optional[str] = None, 
+           enable_reactions: bool = True, save_to_db: bool = True, 
+           config_path: str = "config.yaml") -> Dict[str, Any]:
     """
-    从帖子页面提取标题
+    同步simpcity帖子
     
     Args:
-        thread_url: 帖子URL
-        cookies: cookies字典
+        thread_url: 要同步的帖子URL
+        cookies: 用于登录会话的cookies字典
+        thread_title: 帖子标题（可选）
+        enable_reactions: 是否启用reactions抓取，默认True
+        save_to_db: 是否保存到数据库，默认True
+        config_path: 数据库配置文件路径
     
     Returns:
-        帖子标题，如果提取失败返回默认值
-    """
-    try:
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        包含同步结果的字典：
+        {
+            'success': bool,          # 是否成功
+            'thread_title': str,      # 帖子标题
+            'thread_url': str,        # 帖子URL
+            'new_posts': int,         # 新增帖子数
+            'updated_posts': int,     # 更新帖子数
+            'deleted_posts': int,     # 删除帖子数
+            'unchanged_posts': int,   # 未变化帖子数
+            'total_posts': int,       # 爬取到的总帖子数
+            'db_records': int,        # 数据库操作记录数（新增+更新+删除）
+            'error': str              # 错误信息（如果失败）
         }
+    """
+    result = {
+        'success': False,
+        'thread_title': thread_title or "未知标题",
+        'thread_url': thread_url,
+        'new_posts': 0,
+        'updated_posts': 0,
+        'deleted_posts': 0,
+        'unchanged_posts': 0,
+        'total_posts': 0,
+        'db_records': 0,
+        'error': None
+    }
+    
+    try:
+        print(f"开始同步帖子: {thread_url}")
         
-        session = requests.Session()
-        session.headers.update(headers)
-        session.cookies.update(cookies)
+        # 如果没有提供标题，尝试从页面提取
+        if not thread_title:
+            thread_title = extract_thread_title(thread_url, cookies)
         
-        response = session.get(thread_url, timeout=10)
-        response.raise_for_status()
+        if not thread_title:
+            thread_title = "未知标题"
         
-        soup = BeautifulSoup(response.text, 'html.parser')
+        result['thread_title'] = thread_title
         
-        # 尝试多种方式提取标题
-        title_selectors = [
-            'h1.p-title-value',
-            'h1[data-xf-init="title-tooltip"]',
-            'h1.thread-title',
-            'title'
-        ]
+        # 1. 爬取thread的全量数据
+        print("正在爬取最新数据...")
+        new_posts = scrape_xenforo_thread_with_requests(thread_url, cookies, enable_reactions)
         
-        for selector in title_selectors:
-            title_tag = soup.select_one(selector)
-            if title_tag:
-                title = title_tag.get_text(strip=True)
-                if title and title != 'title':
-                    return title
+        if not new_posts:
+            result['error'] = "未能获取到任何帖子数据"
+            return result
         
-        # 如果都没找到，使用URL作为标题
-        return thread_url.split('/')[-1] or "未知标题"
+        # 设置总帖子数
+        result['total_posts'] = len(new_posts)
+        
+        # 如果不需要保存到数据库，直接返回
+        if not save_to_db:
+            result['success'] = True
+            result['new_posts'] = len(new_posts)
+            return result
+        
+        # 2. 从数据库中查询现有数据
+        db_manager = PostgreSQLManager(config_path)
+        try:
+            # 根据thread_url或thread_title查询现有数据
+            existing_query = """
+                SELECT post_id, author_name, author_id, floor, content_text, content_html,
+                       image_urls, external_links, iframe_urls, post_timestamp, author_profile_url
+                FROM simpcity 
+                WHERE thread_url = %s OR thread = %s
+                ORDER BY floor ASC
+            """
+            existing_posts = db_manager.execute_query(existing_query, (thread_url, thread_title))
+            
+            # 将现有数据转换为以floor为key的字典，方便查找
+            existing_posts_dict = {}
+            for post in existing_posts:
+                floor_key = post['floor']
+                if floor_key is not None:
+                    existing_posts_dict[floor_key] = post
+            
+            # 3. 对比新旧数据
+            print("正在对比数据差异...")
+            
+            # 新爬取的数据转换为以floor为key的字典
+            new_posts_dict = {}
+            for post in new_posts:
+                floor_key = post.get('floor')
+                if floor_key is not None:
+                    new_posts_dict[floor_key] = post
+            
+            # 找出新增、修改、未变化的帖子
+            new_post_list = []
+            updated_post_list = []
+            unchanged_count = 0
+            
+            for floor, new_post in new_posts_dict.items():
+                if floor not in existing_posts_dict:
+                    # 新增帖子
+                    new_post_list.append(new_post)
+                else:
+                    # 检查是否有修改
+                    existing_post = existing_posts_dict[floor]
+                    if _is_post_changed(new_post, existing_post):
+                        updated_post_list.append(new_post)
+                    else:
+                        unchanged_count += 1
+            
+            # 找出已删除的帖子（在原数据中存在但在新数据中不存在）
+            deleted_floors = set(existing_posts_dict.keys()) - set(new_posts_dict.keys())
+            
+            # 4. 执行数据库操作
+            print(f"发现变化：新增{len(new_post_list)}个，更新{len(updated_post_list)}个，删除{len(deleted_floors)}个，未变化{unchanged_count}个")
+            
+            # 插入新增的帖子
+            if new_post_list:
+                new_records = _save_posts_to_database_sync(new_post_list, thread_title, thread_url, db_manager)
+                result['new_posts'] = new_records
+                print(f"新增了 {new_records} 条记录")
+            
+            # 更新修改的帖子
+            if updated_post_list:
+                updated_records = _update_posts_in_database(updated_post_list, thread_title, thread_url, db_manager)
+                result['updated_posts'] = updated_records
+                print(f"更新了 {updated_records} 条记录")
+            
+            # 标记删除的帖子
+            if deleted_floors:
+                deleted_records = _mark_posts_as_deleted(deleted_floors, thread_url, thread_title, db_manager)
+                result['deleted_posts'] = deleted_records
+                print(f"标记删除了 {deleted_records} 条记录")
+            
+            result['unchanged_posts'] = unchanged_count
+            result['db_records'] = result['new_posts'] + result['updated_posts'] + result['deleted_posts']
+            result['success'] = True
+            
+            print(f"同步完成：新增{result['new_posts']}，更新{result['updated_posts']}，删除{result['deleted_posts']}，未变化{result['unchanged_posts']}")
+            
+        finally:
+            db_manager.close_all_connections()
+        
+        return result
         
     except Exception as e:
-        print(f"提取标题时发生错误: {e}")
-        return thread_url.split('/')[-1] or "未知标题"
+        error_msg = f"同步过程中发生错误: {str(e)}"
+        print(error_msg)
+        result['error'] = error_msg
+        return result
+
+
+def _is_post_changed(new_post: Dict[str, Any], existing_post: Dict[str, Any]) -> bool:
+    """
+    判断帖子是否有变化
+    
+    Args:
+        new_post: 新爬取的帖子数据
+        existing_post: 数据库中现有的帖子数据
+    
+    Returns:
+        True表示有变化，False表示无变化
+    """
+    # 比较关键字段
+    fields_to_compare = [
+        'author_name', 'author_id', 'content_text', 'content_html',
+        'post_timestamp', 'author_profile_url'
+    ]
+    
+    for field in fields_to_compare:
+        new_value = new_post.get(field)
+        existing_value = existing_post.get(field)
+        
+        # 处理None值的比较
+        if new_value != existing_value:
+            return True
+    
+    # 比较列表字段（需要将JSON字符串转换为列表比较）
+    list_fields = ['image_urls', 'external_links', 'iframe_urls']
+    for field in list_fields:
+        new_value = new_post.get(field, [])
+        existing_value = existing_post.get(field)
+        
+        # 如果existing_value是JSON字符串，需要解析
+        if isinstance(existing_value, str):
+            try:
+                existing_value = json.loads(existing_value)
+            except (json.JSONDecodeError, TypeError):
+                existing_value = []
+        elif existing_value is None:
+            existing_value = []
+        
+        if new_value != existing_value:
+            return True
+    
+    return False
+
+
+def _save_posts_to_database_sync(posts: List[Dict[str, Any]], thread_title: str, 
+                                thread_url: str, db_manager: PostgreSQLManager) -> int:
+    """
+    保存新增的帖子到数据库（同步版本）
+    """
+    if not posts:
+        return 0
+    
+    insert_query = """
+        INSERT INTO simpcity (
+            thread, thread_url, post_id, author_name, author_id, 
+            author_profile_url, post_timestamp, content_text, content_html,
+            image_urls, external_links, iframe_urls, floor
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+    """
+    
+    insert_data = []
+    for post in posts:
+        # 处理floor字段
+        floor_value = post.get('floor')
+        if floor_value is not None:
+            if isinstance(floor_value, str) and floor_value.isdigit():
+                floor_value = int(floor_value)
+            elif not isinstance(floor_value, int):
+                floor_value = None
+        
+        # 将列表转换为JSON字符串
+        image_urls_json = json.dumps(post.get('image_urls', []))
+        external_links_json = json.dumps(post.get('external_links', []))
+        iframe_urls_json = json.dumps(post.get('iframe_urls', []))
+        
+        row_data = (
+            thread_title,
+            thread_url,
+            post.get('post_id'),
+            post.get('author_name'),
+            post.get('author_id'),
+            post.get('author_profile_url'),
+            post.get('post_timestamp'),
+            post.get('content_text'),
+            post.get('content_html'),
+            image_urls_json,
+            external_links_json,
+            iframe_urls_json,
+            floor_value
+        )
+        insert_data.append(row_data)
+    
+    return db_manager.execute_many(insert_query, insert_data)
+
+
+def _update_posts_in_database(posts: List[Dict[str, Any]], thread_title: str, 
+                             thread_url: str, db_manager: PostgreSQLManager) -> int:
+    """
+    更新修改的帖子到数据库
+    """
+    if not posts:
+        return 0
+    
+    update_query = """
+        UPDATE simpcity SET
+            thread = %s, thread_url = %s, post_id = %s, author_name = %s, 
+            author_id = %s, author_profile_url = %s, post_timestamp = %s, 
+            content_text = %s, content_html = %s, image_urls = %s, 
+            external_links = %s, iframe_urls = %s
+        WHERE (thread_url = %s OR thread = %s) AND floor = %s
+    """
+    
+    update_data = []
+    for post in posts:
+        # 处理floor字段
+        floor_value = post.get('floor')
+        if floor_value is not None:
+            if isinstance(floor_value, str) and floor_value.isdigit():
+                floor_value = int(floor_value)
+            elif not isinstance(floor_value, int):
+                floor_value = None
+        
+        # 将列表转换为JSON字符串
+        image_urls_json = json.dumps(post.get('image_urls', []))
+        external_links_json = json.dumps(post.get('external_links', []))
+        iframe_urls_json = json.dumps(post.get('iframe_urls', []))
+        
+        row_data = (
+            thread_title,
+            thread_url,
+            post.get('post_id'),
+            post.get('author_name'),
+            post.get('author_id'),
+            post.get('author_profile_url'),
+            post.get('post_timestamp'),
+            post.get('content_text'),
+            post.get('content_html'),
+            image_urls_json,
+            external_links_json,
+            iframe_urls_json,
+            thread_url,
+            thread_title,
+            floor_value
+        )
+        update_data.append(row_data)
+    
+    updated_count = 0
+    for row_data in update_data:
+        updated_count += db_manager.execute_update(update_query, row_data)
+    
+    return updated_count
+
+
+def _mark_posts_as_deleted(deleted_floors: set, thread_url: str, thread_title: str, 
+                          db_manager: PostgreSQLManager) -> int:
+    """
+    标记删除的帖子
+    
+    注意：此方法假设数据库表中有is_deleted字段。
+    如果表中没有此字段，需要先添加该字段：
+    ALTER TABLE simpcity ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;
+    """
+    if not deleted_floors:
+        return 0
+    
+    # 构建批量更新查询
+    placeholders = ','.join(['%s'] * len(deleted_floors))
+    update_query = f"""
+        UPDATE simpcity SET is_deleted = TRUE
+        WHERE (thread_url = %s OR thread = %s) AND floor IN ({placeholders})
+    """
+    
+    # 准备参数
+    params = [thread_url, thread_title] + list(deleted_floors)
+    
+    try:
+        return db_manager.execute_update(update_query, tuple(params))
+    except Exception as e:
+        print(f"标记删除失败，可能是因为数据库表中没有is_deleted字段: {e}")
+        print("请先执行SQL: ALTER TABLE simpcity ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;")
+        return 0
 
 
 
