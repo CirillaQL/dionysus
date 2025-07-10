@@ -3,9 +3,17 @@ from bs4 import BeautifulSoup, Tag
 import time
 import random
 import json
+import threading
+import logging
+from datetime import datetime
 
 from urllib.parse import urljoin
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Union
+
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 
 from db.postgre import PostgreSQLManager
 
@@ -671,6 +679,221 @@ def sync(thread_url: str, cookies: dict, thread_title: Optional[str] = None,
         result['error'] = error_msg
         return result
 
+def watch(thread_url: str, cookies: dict, 
+          schedule_type: str = "interval", 
+          interval_minutes: int = 60,
+          cron_expression: Optional[str] = None,
+          thread_title: Optional[str] = None,
+          enable_reactions: bool = True,
+          save_to_db: bool = True,
+          config_path: str = "config.yaml") -> Dict[str, Any]:
+    """
+    监控simpcity帖子，定时执行同步操作
+    
+    Args:
+        thread_url: 要监控的帖子URL
+        cookies: 用于登录会话的cookies字典
+        schedule_type: 调度类型，支持 "interval" 或 "cron"
+        interval_minutes: 间隔时间（分钟），仅当schedule_type为"interval"时有效
+        cron_expression: cron表达式，仅当schedule_type为"cron"时有效
+        thread_title: 帖子标题（可选）
+        enable_reactions: 是否启用reactions抓取，默认True
+        save_to_db: 是否保存到数据库，默认True
+        config_path: 数据库配置文件路径
+    
+    Returns:
+        包含监控器信息的字典，包含启动/停止方法
+    
+    Example:
+        # 使用间隔调度，每30分钟同步一次
+        watcher = watch(
+            thread_url="https://example.com/thread/123",
+            cookies={"session": "abc123"},
+            schedule_type="interval",
+            interval_minutes=30
+        )
+        
+        # 使用cron表达式，每天早上8点同步
+        watcher = watch(
+            thread_url="https://example.com/thread/123", 
+            cookies={"session": "abc123"},
+            schedule_type="cron",
+            cron_expression="0 8 * * *"
+        )
+        
+        # 启动监控
+        watcher['start']()
+        
+        # 停止监控
+        watcher['stop']()
+    """
+    
+    # 配置日志
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    logger = logging.getLogger(__name__)
+    
+    # 创建调度器
+    scheduler = BackgroundScheduler()
+    
+    # 监控状态
+    watch_info = {
+        'thread_url': thread_url,
+        'thread_title': thread_title,
+        'schedule_type': schedule_type,
+        'interval_minutes': interval_minutes,
+        'cron_expression': cron_expression,
+        'is_running': False,
+        'last_sync_time': None,
+        'last_sync_result': None,
+        'sync_count': 0,
+        'error_count': 0,
+        'scheduler': scheduler
+    }
+    
+    def sync_job():
+        """执行同步任务的内部方法"""
+        try:
+            logger.info(f"开始定时同步任务 - URL: {thread_url}")
+            
+            # 执行同步
+            result = sync(
+                thread_url=thread_url,
+                cookies=cookies,
+                thread_title=thread_title,
+                enable_reactions=enable_reactions,
+                save_to_db=save_to_db,
+                config_path=config_path
+            )
+            
+            # 更新监控信息
+            watch_info['last_sync_time'] = datetime.now()
+            watch_info['last_sync_result'] = result
+            watch_info['sync_count'] += 1
+            
+            if result['success']:
+                logger.info(f"同步任务完成 - 新增:{result['new_posts']} 更新:{result['updated_posts']} 删除:{result['deleted_posts']}")
+            else:
+                logger.error(f"同步任务失败: {result.get('error', '未知错误')}")
+                watch_info['error_count'] += 1
+                
+        except Exception as e:
+            logger.error(f"执行同步任务时发生异常: {str(e)}")
+            watch_info['error_count'] += 1
+            watch_info['last_sync_result'] = {
+                'success': False,
+                'error': str(e)
+            }
+    
+    def job_listener(event):
+        """作业事件监听器"""
+        if event.exception:
+            logger.error(f"定时任务执行异常: {event.exception}")
+        else:
+            logger.info("定时任务执行成功")
+    
+    # 添加作业监听器
+    scheduler.add_listener(job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+    
+    # 根据调度类型配置触发器
+    if schedule_type == "interval":
+        if interval_minutes <= 0:
+            raise ValueError("interval_minutes 必须大于0")
+        
+        trigger = IntervalTrigger(minutes=interval_minutes)
+        job_id = f"sync_{hash(thread_url)}_interval_{interval_minutes}"
+        logger.info(f"配置间隔调度: 每{interval_minutes}分钟执行一次")
+        
+    elif schedule_type == "cron":
+        if not cron_expression:
+            raise ValueError("使用cron调度类型时必须提供cron_expression")
+        
+        try:
+            trigger = CronTrigger.from_crontab(cron_expression)
+            job_id = f"sync_{hash(thread_url)}_cron_{hash(cron_expression)}"
+            logger.info(f"配置cron调度: {cron_expression}")
+        except Exception as e:
+            raise ValueError(f"无效的cron表达式: {cron_expression}, 错误: {e}")
+    
+    else:
+        raise ValueError(f"不支持的调度类型: {schedule_type}，仅支持 'interval' 或 'cron'")
+    
+    # 添加作业到调度器
+    scheduler.add_job(
+        func=sync_job,
+        trigger=trigger,
+        id=job_id,
+        name=f"SimpCity同步任务 - {thread_title or thread_url}",
+        replace_existing=True,
+        max_instances=1  # 防止重复执行
+    )
+    
+    def start_watch():
+        """启动监控"""
+        if not watch_info['is_running']:
+            try:
+                scheduler.start()
+                watch_info['is_running'] = True
+                logger.info(f"监控已启动 - {thread_title or thread_url}")
+                
+                # 可选：立即执行一次同步
+                logger.info("立即执行首次同步...")
+                sync_job()
+                
+            except Exception as e:
+                logger.error(f"启动监控失败: {e}")
+                raise
+        else:
+            logger.warning("监控已经在运行中")
+    
+    def stop_watch():
+        """停止监控"""
+        if watch_info['is_running']:
+            try:
+                scheduler.shutdown()
+                watch_info['is_running'] = False
+                logger.info(f"监控已停止 - {thread_title or thread_url}")
+            except Exception as e:
+                logger.error(f"停止监控失败: {e}")
+                raise
+        else:
+            logger.warning("监控未在运行")
+    
+    def get_status():
+        """获取监控状态"""
+        # 安全地获取下次运行时间
+        next_run_time = None
+        if watch_info['is_running']:
+            job = scheduler.get_job(job_id)
+            if job:
+                next_run_time = job.next_run_time
+        
+        return {
+            'is_running': watch_info['is_running'],
+            'thread_url': watch_info['thread_url'],
+            'thread_title': watch_info['thread_title'],
+            'schedule_type': watch_info['schedule_type'],
+            'interval_minutes': watch_info['interval_minutes'],
+            'cron_expression': watch_info['cron_expression'],
+            'last_sync_time': watch_info['last_sync_time'],
+            'last_sync_result': watch_info['last_sync_result'],
+            'sync_count': watch_info['sync_count'],
+            'error_count': watch_info['error_count'],
+            'next_run_time': next_run_time
+        }
+    
+    def force_sync():
+        """强制执行一次同步"""
+        logger.info("手动触发同步任务...")
+        sync_job()
+    
+    # 返回监控器对象
+    return {
+        'start': start_watch,
+        'stop': stop_watch,
+        'status': get_status,
+        'force_sync': force_sync,
+        'info': watch_info
+    }
 
 def _is_post_changed(new_post: Dict[str, Any], existing_post: Dict[str, Any]) -> bool:
     """

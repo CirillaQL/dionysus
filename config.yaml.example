@@ -1,5 +1,23 @@
 cookies:
+  # 从浏览器导出的cookies列表
+  # 可以使用浏览器插件如"Cookie Editor"导出为JSON格式
+  # 或者直接从浏览器开发者工具中复制
+  # 示例格式：
+  # - domain: ".simpcity.su"
+  #   name: "session_id"
+  #   value: "your_session_id_here"
+  #   path: "/"
+  #   secure: true
+  #   httpOnly: true
+  # - domain: "simpcity.su"
+  #   name: "user_token"
+  #   value: "your_user_token_here"
+  #   path: "/"
+  #   secure: false
+  #   httpOnly: false
   
+  # 如果cookies为空，程序会尝试从browser_cookies.json文件加载
+  # 你可以将cookies留空并使用单独的浏览器cookies文件
 
 database:
   host: "localhost"
