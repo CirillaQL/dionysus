@@ -1,5 +1,9 @@
 # SimpCity API
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python](https://img.shields.io/badge/python-3.13+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.116+-green.svg)](https://fastapi.tiangolo.com/)
+
 基于FastAPI的SimpCity论坛爬虫API服务，提供帖子爬取、同步和监控功能。
 
 ## 特性
@@ -257,7 +261,7 @@ uv run fastapi dev app/main.py
 
 ## 许可证
 
-[您的许可证]
+本项目基于 [Apache License 2.0](LICENSE) 开源协议发布。
 
 ## 贡献
 

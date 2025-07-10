@@ -1,8 +1,21 @@
 [project]
 name = "dionysus"
 version = "0.1.0"
-description = "Add your description here"
+description = "SimpCity论坛爬虫API服务，提供帖子爬取、同步和监控功能"
 readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "SimpCity API Project"},
+]
+keywords = ["simpcity", "crawler", "api", "fastapi", "forum"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers", 
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.13",
+]
 requires-python = ">=3.13"
 dependencies = [
     "apscheduler>=3.11.0",
