@@ -14,16 +14,21 @@
 
 from fastapi import FastAPI, BackgroundTasks, HTTPException, status
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field, HttpUrl
 from typing import Optional, Dict, Any, List
 import logging
 import asyncio
 from datetime import datetime
 import uuid
+from pathlib import Path
+import os
 
 from crawler.simpcity.simpcity import crawler, sync, watch
 from config.config import get_config
 from cookies.cookies import BrowserCookies
+from app.router.threads import router as threads_router
 
 # 配置统一日志
 logging.basicConfig(
@@ -40,6 +45,37 @@ app = FastAPI(
     description="SimpCity论坛爬虫API接口",
     version="1.0.0"
 )
+
+# 注册路由
+app.include_router(threads_router)
+
+# 配置静态文件服务
+dist_path = Path("dist")
+if dist_path.exists():
+    # 挂载静态文件
+    app.mount("/assets", StaticFiles(directory="dist/assets"), name="assets")
+    
+    # 提供前端页面
+    @app.get("/")
+    async def serve_frontend():
+        """提供前端页面"""
+        return FileResponse("dist/index.html")
+    
+    # 处理前端路由（SPA 路由）
+    @app.get("/{path:path}")
+    async def serve_spa(path: str):
+        """处理前端 SPA 路由"""
+        # 如果是 API 路由，跳过
+        if path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        
+        # 检查是否是静态文件
+        static_file_path = dist_path / path
+        if static_file_path.exists() and static_file_path.is_file():
+            return FileResponse(static_file_path)
+        
+        # 否则返回 index.html（SPA 路由）
+        return FileResponse("dist/index.html")
 
 # 全局监控器存储
 active_watchers: Dict[str, Dict[str, Any]] = {}
@@ -111,26 +147,28 @@ def load_cookies_from_config(config_path: str = "config.yaml") -> Dict[str, str]
             detail=f"加载cookies失败: {str(e)}"
         )
 
-@app.get("/", response_model=ApiResponse)
-async def root():
-    """根路径，返回API信息"""
+@app.get("/api", response_model=ApiResponse)
+async def api_root():
+    """API根路径，返回API信息"""
     return ApiResponse(
         success=True,
         message="SimpCity API服务运行正常",
         data={
             "version": "1.0.0",
             "endpoints": [
-                "/docs - API文档",
-                "/crawler - 爬取帖子",
-                "/sync - 同步帖子",
-                "/watch - 监控帖子",
-                "/watchers - 获取所有监控器",
-                "/watchers/{watcher_id} - 管理监控器"
+                "/api/docs - API文档",
+                "/api/threads - 获取线程列表",
+                "/api/threads/{thread_url} - 获取线程详情",
+                "/api/crawler - 爬取帖子",
+                "/api/sync - 同步帖子",
+                "/api/watch - 监控帖子",
+                "/api/watchers - 获取所有监控器",
+                "/api/watchers/{watcher_id} - 管理监控器"
             ]
         }
     )
 
-@app.post("/crawler", response_model=ApiResponse)
+@app.post("/api/crawler", response_model=ApiResponse)
 async def crawl_thread(request: CrawlerRequest, background_tasks: BackgroundTasks):
     """
     爬取帖子
@@ -181,7 +219,7 @@ async def crawl_thread(request: CrawlerRequest, background_tasks: BackgroundTask
             detail=f"爬取任务启动失败: {str(e)}"
         )
 
-@app.post("/sync", response_model=ApiResponse)
+@app.post("/api/sync", response_model=ApiResponse)
 async def sync_thread(request: SyncRequest):
     """
     同步帖子
@@ -230,7 +268,7 @@ async def sync_thread(request: SyncRequest):
             detail=f"同步失败: {str(e)}"
         )
 
-@app.post("/watch", response_model=ApiResponse)
+@app.post("/api/watch", response_model=ApiResponse)
 async def start_watch(request: WatchRequest):
     """
     启动监控
@@ -293,7 +331,7 @@ async def start_watch(request: WatchRequest):
             detail=f"监控器启动失败: {str(e)}"
         )
 
-@app.get("/watchers", response_model=ApiResponse)
+@app.get("/api/watchers", response_model=ApiResponse)
 async def list_watchers():
     """
     获取所有监控器列表
@@ -333,7 +371,7 @@ async def list_watchers():
             detail=f"获取监控器列表失败: {str(e)}"
         )
 
-@app.get("/watchers/{watcher_id}", response_model=ApiResponse)
+@app.get("/api/watchers/{watcher_id}", response_model=ApiResponse)
 async def get_watcher(watcher_id: str):
     """
     获取指定监控器的详细状态
@@ -369,7 +407,7 @@ async def get_watcher(watcher_id: str):
             detail=f"获取监控器状态失败: {str(e)}"
         )
 
-@app.delete("/watchers/{watcher_id}", response_model=ApiResponse)
+@app.delete("/api/watchers/{watcher_id}", response_model=ApiResponse)
 async def stop_watcher(watcher_id: str):
     """
     停止并删除指定监控器
@@ -407,7 +445,7 @@ async def stop_watcher(watcher_id: str):
             detail=f"停止监控器失败: {str(e)}"
         )
 
-@app.post("/watchers/{watcher_id}/force-sync", response_model=ApiResponse)
+@app.post("/api/watchers/{watcher_id}/force-sync", response_model=ApiResponse)
 async def force_sync_watcher(watcher_id: str):
     """
     手动触发指定监控器执行同步

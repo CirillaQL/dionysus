@@ -1,0 +1,329 @@
+/* 全局样式 */
+#root {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1rem;
+}
+
+/* 主应用容器 */
+.app {
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* 头部样式 */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  padding: 1rem 0;
+  border-bottom: 2px solid #eee;
+}
+
+.header h1 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 2rem;
+}
+
+.header-actions {
+  display: flex;
+  gap: 1rem;
+}
+
+.refresh-btn {
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.refresh-btn:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+/* 状态样式 */
+.loading {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.1rem;
+  color: #7f8c8d;
+}
+
+.error-message {
+  background: #e74c3c;
+  color: white;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.error-message p {
+  margin: 0;
+}
+
+.retry-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.retry-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 统计信息 */
+.threads-stats {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.threads-stats p {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #2c3e50;
+}
+
+/* 线程列表 */
+.threads-list {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+/* 线程卡片 */
+.thread-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.3s, transform 0.2s;
+}
+
+.thread-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+  transform: translateY(-2px);
+}
+
+.thread-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.thread-title {
+  margin: 0;
+  font-size: 1.2rem;
+  color: #2c3e50;
+  line-height: 1.4;
+  flex: 1;
+  margin-right: 1rem;
+}
+
+.thread-index {
+  background: #3498db;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  flex-shrink: 0;
+}
+
+.thread-meta {
+  display: grid;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.thread-stats {
+  display: flex;
+  gap: 2rem;
+}
+
+.stat {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+}
+
+.stat strong {
+  color: #2c3e50;
+}
+
+.thread-dates {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.date-item {
+  color: #7f8c8d;
+  font-size: 0.9rem;
+}
+
+.date-item strong {
+  color: #2c3e50;
+}
+
+.thread-url {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid #ecf0f1;
+}
+
+.thread-url a {
+  color: #3498db;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.3s;
+}
+
+.thread-url a:hover {
+  color: #2980b9;
+  text-decoration: underline;
+}
+
+/* 分页样式 */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  padding: 2rem 0;
+}
+
+.page-btn {
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.page-btn:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+.page-info {
+  padding: 0.5rem 1rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #2c3e50;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  #root {
+    padding: 0.5rem;
+  }
+  
+  .header {
+    flex-direction: column;
+    gap: 1rem;
+    align-items: flex-start;
+  }
+  
+  .header h1 {
+    font-size: 1.5rem;
+  }
+  
+  .thread-card {
+    padding: 1rem;
+  }
+  
+  .thread-header {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .thread-title {
+    margin-right: 0;
+  }
+  
+  .thread-stats {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+  
+  .pagination {
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+}
+
+/* 深色主题支持 */
+@media (prefers-color-scheme: dark) {
+  .app {
+    background: #1a1a1a;
+    color: #e0e0e0;
+  }
+  
+  .header {
+    border-bottom-color: #333;
+  }
+  
+  .header h1 {
+    color: #e0e0e0;
+  }
+  
+  .thread-card {
+    background: #2d2d2d;
+    border-color: #404040;
+  }
+  
+  .thread-title {
+    color: #e0e0e0;
+  }
+  
+  .stat strong,
+  .date-item strong {
+    color: #e0e0e0;
+  }
+  
+  .thread-url {
+    border-top-color: #404040;
+  }
+  
+  .threads-stats {
+    background: #2d2d2d;
+  }
+  
+  .threads-stats p {
+    color: #e0e0e0;
+  }
+  
+  .page-info {
+    background: #2d2d2d;
+    color: #e0e0e0;
+  }
+}
