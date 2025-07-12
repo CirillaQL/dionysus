@@ -20,6 +20,8 @@ import json
 import threading
 import logging
 from datetime import datetime
+import uuid
+import copy
 
 from urllib.parse import urljoin
 from typing import Dict, Any, Optional, List, Union
@@ -334,9 +336,9 @@ def scrape_xenforo_thread_with_requests(start_url: str, cookies: dict, enable_re
 
 
 def save_posts_to_database(posts: List[Dict[str, Any]], thread_title: str, thread_url: str, 
-                          db_manager: PostgreSQLManager) -> int:
+                          db_manager: PostgreSQLManager, cookies: Optional[dict] = None) -> int:
     """
-    将爬取的帖子数据保存到PostgreSQL数据库
+    将爬取的帖子数据保存到PostgreSQL数据库的新三表结构
     
     Args:
         posts: 爬取的帖子数据列表
@@ -351,69 +353,217 @@ def save_posts_to_database(posts: List[Dict[str, Any]], thread_title: str, threa
         print("没有数据需要保存")
         return 0
     
-    insert_query = """
-        INSERT INTO simpcity (
-            thread, thread_url, post_id, author_name, author_id, 
-            author_profile_url, post_timestamp, content_text, content_html,
-            image_urls, external_links, iframe_urls, floor
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-        )
-    """
-    
-    insert_data = []
-    for post in posts:
-        # 处理 floor 字段，确保是BIGINT兼容的数字类型
-        floor_value = post.get('floor')
-        if floor_value is not None:
-            if isinstance(floor_value, str) and floor_value.isdigit():
-                floor_value = int(floor_value)
-            elif not isinstance(floor_value, int):
-                floor_value = None
-        
-        # 将列表转换为JSON字符串用于JSONB字段
-        image_urls_json = json.dumps(post.get('image_urls', []))
-        external_links_json = json.dumps(post.get('external_links', []))
-        iframe_urls_json = json.dumps(post.get('iframe_urls', []))
-        
-        row_data = (
-            thread_title,                           # thread
-            thread_url,                             # thread_url
-            post.get('post_id'),                    # post_id
-            post.get('author_name'),                # author_name
-            post.get('author_id'),                  # author_id
-            post.get('author_profile_url'),         # author_profile_url
-            post.get('post_timestamp'),             # post_timestamp
-            post.get('content_text'),               # content_text
-            post.get('content_html'),               # content_html
-            image_urls_json,                        # image_urls
-            external_links_json,                    # external_links
-            iframe_urls_json,                       # iframe_urls
-            floor_value                             # floor
-        )
-        insert_data.append(row_data)
-    
     try:
-        # 使用批量插入
-        affected_rows = db_manager.execute_many(insert_query, insert_data)
-        print(f"成功保存 {affected_rows} 条记录到数据库")
+        # 1. 检查线程是否存在，如果不存在则插入到 simpcity_thread_metadata 表
+        thread_uuid = _ensure_thread_exists(thread_title, thread_url, db_manager, cookies)
+        
+        # 2. 插入帖子数据到 simpcity_thread_response 表
+        insert_response_query = """
+            INSERT INTO simpcity_thread_response (
+                uuid, thread_uuid, post_id, author_name, author_id, 
+                author_profile_url, post_timestamp, content_text, content_html,
+                image_urls, external_links, iframe_urls, floor
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+        """
+        
+        insert_data = []
+        post_uuids = []
+        
+        for post in posts:
+            # 为每个帖子生成UUID
+            post_uuid = str(uuid.uuid4())
+            post_uuids.append((post_uuid, post.get('total_reactions', 0)))
+            
+            # 处理 floor 字段，确保是BIGINT兼容的数字类型
+            floor_value = post.get('floor')
+            if floor_value is not None:
+                if isinstance(floor_value, str) and floor_value.isdigit():
+                    floor_value = int(floor_value)
+                elif not isinstance(floor_value, int):
+                    floor_value = None
+            
+            # 将列表转换为JSONB格式
+            image_urls_json = json.dumps(post.get('image_urls', []))
+            external_links_json = json.dumps(post.get('external_links', []))
+            iframe_urls_json = json.dumps(post.get('iframe_urls', []))
+            
+            row_data = (
+                post_uuid,                              # uuid
+                thread_uuid,                            # thread_uuid
+                str(post.get('post_id')) if post.get('post_id') is not None else None,  # post_id
+                post.get('author_name'),                # author_name
+                str(post.get('author_id')) if post.get('author_id') is not None else None,  # author_id
+                post.get('author_profile_url'),         # author_profile_url
+                post.get('post_timestamp'),             # post_timestamp
+                post.get('content_text'),               # content_text
+                post.get('content_html'),               # content_html
+                image_urls_json,                        # image_urls
+                external_links_json,                    # external_links
+                iframe_urls_json,                       # iframe_urls
+                floor_value                             # floor
+            )
+            insert_data.append(row_data)
+        
+        # 批量插入帖子数据
+        affected_rows = db_manager.execute_many(insert_response_query, insert_data)
+        print(f"成功保存 {affected_rows} 条帖子记录到数据库")
+        
+        # 3. 插入反应数据到 simpcity_thread_reactions 表
+        reactions_inserted = _save_reactions_to_database(post_uuids, db_manager)
+        print(f"成功保存 {reactions_inserted} 条反应记录到数据库")
+        
         return affected_rows
+        
     except Exception as e:
         print(f"保存数据到数据库时发生错误: {e}")
         return 0
 
 
-def extract_thread_title(thread_url: str, cookies: dict) -> str:
+def _ensure_thread_exists(thread_title: str, thread_url: str, db_manager: PostgreSQLManager, 
+                         cookies: Optional[dict] = None) -> str:
     """
-    从帖子页面提取标题
+    确保线程存在于 simpcity_thread_metadata 表中，如果不存在则插入
+    
+    Args:
+        thread_title: 线程标题
+        thread_url: 线程URL
+        db_manager: 数据库管理器
+        cookies: cookies字典，用于抓取元数据
+    
+    Returns:
+        thread_uuid: 线程的UUID
+    """
+    try:
+        # 首先检查线程是否已存在
+        check_query = """
+            SELECT uuid FROM simpcity_thread_metadata 
+            WHERE url = %s AND is_deleted = false
+        """
+        existing_thread = db_manager.execute_one(check_query, (thread_url,))
+        
+        if existing_thread:
+            # 线程已存在，返回其UUID
+            return str(existing_thread['uuid'])
+        
+        # 线程不存在，创建新的线程记录
+        thread_uuid = str(uuid.uuid4())
+        
+        # 尝试抓取完整的线程元数据
+        metadata = None
+        if cookies:
+            try:
+                metadata = extract_thread_metadata(thread_url, cookies)
+                print(f"成功抓取线程元数据: {metadata}")
+            except Exception as e:
+                print(f"抓取线程元数据失败，使用基本信息: {e}")
+        
+        # 准备插入数据
+        if metadata:
+            insert_query = """
+                INSERT INTO simpcity_thread_metadata (
+                    uuid, name, categories, tags, url, avatar_img, description, create_time, update_time
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, NOW(), NOW()
+                )
+            """
+            
+            # 将数组转换为PostgreSQL数组格式
+            categories_array = metadata['categories'] if metadata['categories'] else None
+            tags_array = metadata['tags'] if metadata['tags'] else None
+            
+            db_manager.execute_update(insert_query, (
+                thread_uuid,
+                metadata['title'] or thread_title,
+                categories_array,
+                tags_array,
+                thread_url,
+                metadata['avatar_img'],
+                metadata['description']
+            ))
+            
+            print(f"创建新线程记录: {metadata['title']} (Categories: {categories_array}, Tags: {tags_array})")
+        else:
+            # 如果没有元数据，使用基本信息
+            insert_query = """
+                INSERT INTO simpcity_thread_metadata (
+                    uuid, name, url, create_time, update_time
+                ) VALUES (
+                    %s, %s, %s, NOW(), NOW()
+                )
+            """
+            
+            db_manager.execute_update(insert_query, (thread_uuid, thread_title, thread_url))
+            print(f"创建新线程记录: {thread_title}")
+        
+        return thread_uuid
+        
+    except Exception as e:
+        print(f"确保线程存在时发生错误: {e}")
+        raise
+
+
+def _save_reactions_to_database(post_uuids: List[tuple], db_manager: PostgreSQLManager) -> int:
+    """
+    将反应数据保存到 simpcity_thread_reactions 表
+    
+    Args:
+        post_uuids: [(post_uuid, reactions_count), ...] 元组列表
+        db_manager: 数据库管理器
+    
+    Returns:
+        成功插入的记录数
+    """
+    if not post_uuids:
+        return 0
+    
+    try:
+        insert_query = """
+            INSERT INTO simpcity_thread_reactions (
+                uuid, post_uuid, reactions, create_time, update_time
+            ) VALUES (
+                %s, %s, %s, NOW(), NOW()
+            )
+        """
+        
+        insert_data = []
+        for post_uuid, reactions_count in post_uuids:
+            # 只插入有反应的帖子
+            if reactions_count > 0:
+                reaction_uuid = str(uuid.uuid4())
+                insert_data.append((reaction_uuid, post_uuid, reactions_count))
+        
+        if insert_data:
+            affected_rows = db_manager.execute_many(insert_query, insert_data)
+            return affected_rows
+        
+        return 0
+        
+    except Exception as e:
+        print(f"保存反应数据时发生错误: {e}")
+        return 0
+
+
+def extract_thread_metadata(thread_url: str, cookies: dict) -> Dict[str, Any]:
+    """
+    从帖子页面提取完整的线程元数据，包括标题、categories和tags
     
     Args:
         thread_url: 帖子URL
         cookies: cookies字典
     
     Returns:
-        帖子标题，如果提取失败返回默认值
+        包含线程元数据的字典
     """
+    metadata = {
+        'title': None,
+        'categories': [],
+        'tags': [],
+        'description': None,
+        'avatar_img': None
+    }
+    
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
@@ -428,27 +578,92 @@ def extract_thread_title(thread_url: str, cookies: dict) -> str:
         
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # 尝试多种方式提取标题
-        title_selectors = [
-            'h1.p-title-value',
-            'h1[data-xf-init="title-tooltip"]',
-            'h1.thread-title',
-            'title'
-        ]
+        # 1. 提取标题和categories
+        title_element = soup.select_one('h1.p-title-value')
+        if title_element:
+            # 提取categories（标签）
+            label_elements = title_element.select('span.label')
+            for label in label_elements:
+                category_text = label.get_text(strip=True)
+                if category_text:
+                    metadata['categories'].append(category_text)
+            
+            # 提取纯文本标题（去除标签部分）
+            # 先移除所有的标签元素，然后获取剩余的文本
+            title_copy = copy.copy(title_element)
+            for label in title_copy.select('span.label'):
+                label.decompose()
+            for label_append in title_copy.select('span.label-append'):
+                label_append.decompose()
+            
+            # 获取纯标题文本
+            title_text = title_copy.get_text(strip=True)
+            if title_text:
+                metadata['title'] = title_text
         
-        for selector in title_selectors:
-            title_tag = soup.select_one(selector)
-            if title_tag:
-                title = title_tag.get_text(strip=True)
-                if title and title != 'title':
-                    return title
+        # 如果标题仍然为空，尝试其他方式
+        if not metadata['title']:
+            title_selectors = [
+                'h1[data-xf-init="title-tooltip"]',
+                'h1.thread-title',
+                'title'
+            ]
+            
+            for selector in title_selectors:
+                title_tag = soup.select_one(selector)
+                if title_tag:
+                    title = title_tag.get_text(strip=True)
+                    if title and title != 'title':
+                        metadata['title'] = title
+                        break
         
-        # 如果都没找到，使用URL作为标题
-        return thread_url.split('/')[-1] or "未知标题"
+        # 2. 提取tags
+        tag_list = soup.select_one('dl.tagList')
+        if tag_list:
+            tag_elements = tag_list.select('a.tagItem')
+            for tag_element in tag_elements:
+                tag_text = tag_element.get_text(strip=True)
+                if tag_text:
+                    metadata['tags'].append(tag_text)
+        
+        # 3. 提取描述信息（如果存在）
+        description_element = soup.select_one('.p-description, .thread-description')
+        if description_element:
+            metadata['description'] = description_element.get_text(strip=True)
+        
+        # 4. 提取头像/封面图片（如果存在）
+        avatar_element = soup.select_one('.p-title-pageAction img, .thread-avatar img')
+        if avatar_element and avatar_element.has_attr('src'):
+            metadata['avatar_img'] = avatar_element['src']
+        
+        # 如果标题仍然为空，使用URL作为标题
+        if not metadata['title']:
+            metadata['title'] = thread_url.split('/')[-1] or "未知标题"
+        
+        print(f"提取线程元数据成功: 标题={metadata['title']}, Categories={metadata['categories']}, Tags={metadata['tags']}")
+        
+        return metadata
         
     except Exception as e:
-        print(f"提取标题时发生错误: {e}")
-        return thread_url.split('/')[-1] or "未知标题"
+        print(f"提取线程元数据时发生错误: {e}")
+        # 返回默认值
+        metadata['title'] = thread_url.split('/')[-1] or "未知标题"
+        return metadata
+
+
+def extract_thread_title(thread_url: str, cookies: dict) -> str:
+    """
+    从帖子页面提取标题（保持向后兼容）
+    
+    Args:
+        thread_url: 帖子URL
+        cookies: cookies字典
+    
+    Returns:
+        帖子标题，如果提取失败返回默认值
+    """
+    metadata = extract_thread_metadata(thread_url, cookies)
+    return metadata['title']
 
 def crawler(thread_url: str, cookies: dict, thread_title: Optional[str] = None, 
            enable_reactions: bool = True, save_to_db: bool = True, 
@@ -519,7 +734,7 @@ def crawler(thread_url: str, cookies: dict, thread_title: Optional[str] = None,
             print("正在保存数据到数据库...")
             db_manager = PostgreSQLManager(config_path)
             try:
-                db_records = save_posts_to_database(posts, thread_title, thread_url, db_manager)
+                db_records = save_posts_to_database(posts, thread_title, thread_url, db_manager, cookies)
                 result['db_records'] = db_records
                 print(f"数据库操作完成，保存了 {db_records} 条记录")
             finally:
@@ -608,15 +823,36 @@ def sync(thread_url: str, cookies: dict, thread_title: Optional[str] = None,
         # 2. 从数据库中查询现有数据
         db_manager = PostgreSQLManager(config_path)
         try:
-            # 根据thread_url或thread_title查询现有数据
+            # 首先获取线程UUID
+            thread_check_query = """
+                SELECT uuid FROM simpcity_thread_metadata 
+                WHERE url = %s AND is_deleted = false
+            """
+            thread_result = db_manager.execute_one(thread_check_query, (thread_url,))
+            
+            if not thread_result:
+                # 线程不存在，所有帖子都是新的
+                result['new_posts'] = len(new_posts)
+                result['total_posts'] = len(new_posts)
+                result['success'] = True
+                
+                if save_to_db:
+                    db_records = _save_posts_to_database_sync(new_posts, thread_title, thread_url, db_manager, cookies)
+                    result['db_records'] = db_records
+                
+                return result
+            
+            thread_uuid = str(thread_result['uuid'])
+            
+            # 根据thread_uuid查询现有数据
             existing_query = """
                 SELECT post_id, author_name, author_id, floor, content_text, content_html,
                        image_urls, external_links, iframe_urls, post_timestamp, author_profile_url
-                FROM simpcity 
-                WHERE thread_url = %s OR thread = %s
+                FROM simpcity_thread_response 
+                WHERE thread_uuid = %s AND is_deleted = false
                 ORDER BY floor ASC
             """
-            existing_posts = db_manager.execute_query(existing_query, (thread_url, thread_title))
+            existing_posts = db_manager.execute_query(existing_query, (thread_uuid,))
             
             # 将现有数据转换为以floor为key的字典，方便查找
             existing_posts_dict = {}
@@ -660,19 +896,19 @@ def sync(thread_url: str, cookies: dict, thread_title: Optional[str] = None,
             
             # 插入新增的帖子
             if new_post_list:
-                new_records = _save_posts_to_database_sync(new_post_list, thread_title, thread_url, db_manager)
+                new_records = _save_posts_to_database_sync(new_post_list, thread_title, thread_url, db_manager, cookies)
                 result['new_posts'] = new_records
                 print(f"新增了 {new_records} 条记录")
             
             # 更新修改的帖子
             if updated_post_list:
-                updated_records = _update_posts_in_database(updated_post_list, thread_title, thread_url, db_manager)
+                updated_records = _update_posts_in_database(updated_post_list, thread_title, thread_url, db_manager, cookies)
                 result['updated_posts'] = updated_records
                 print(f"更新了 {updated_records} 条记录")
             
             # 标记删除的帖子
             if deleted_floors:
-                deleted_records = _mark_posts_as_deleted(deleted_floors, thread_url, thread_title, db_manager)
+                deleted_records = _mark_posts_as_deleted(deleted_floors, thread_url, thread_title, db_manager, cookies)
                 result['deleted_posts'] = deleted_records
                 print(f"标记删除了 {deleted_records} 条记录")
             
@@ -956,143 +1192,234 @@ def _is_post_changed(new_post: Dict[str, Any], existing_post: Dict[str, Any]) ->
 
 
 def _save_posts_to_database_sync(posts: List[Dict[str, Any]], thread_title: str, 
-                                thread_url: str, db_manager: PostgreSQLManager) -> int:
+                                thread_url: str, db_manager: PostgreSQLManager, cookies: Optional[dict] = None) -> int:
     """
-    保存新增的帖子到数据库（同步版本）
+    保存新增的帖子到数据库（同步版本）- 适配新的三表结构
     """
     if not posts:
         return 0
     
-    insert_query = """
-        INSERT INTO simpcity (
-            thread, thread_url, post_id, author_name, author_id, 
-            author_profile_url, post_timestamp, content_text, content_html,
-            image_urls, external_links, iframe_urls, floor
-        ) VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
-        )
-    """
-    
-    insert_data = []
-    for post in posts:
-        # 处理floor字段
-        floor_value = post.get('floor')
-        if floor_value is not None:
-            if isinstance(floor_value, str) and floor_value.isdigit():
-                floor_value = int(floor_value)
-            elif not isinstance(floor_value, int):
-                floor_value = None
+    try:
+        # 1. 确保线程存在
+        thread_uuid = _ensure_thread_exists(thread_title, thread_url, db_manager, cookies)
         
-        # 将列表转换为JSON字符串
-        image_urls_json = json.dumps(post.get('image_urls', []))
-        external_links_json = json.dumps(post.get('external_links', []))
-        iframe_urls_json = json.dumps(post.get('iframe_urls', []))
+        # 2. 插入帖子数据
+        insert_query = """
+            INSERT INTO simpcity_thread_response (
+                uuid, thread_uuid, post_id, author_name, author_id, 
+                author_profile_url, post_timestamp, content_text, content_html,
+                image_urls, external_links, iframe_urls, floor
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+        """
         
-        row_data = (
-            thread_title,
-            thread_url,
-            post.get('post_id'),
-            post.get('author_name'),
-            post.get('author_id'),
-            post.get('author_profile_url'),
-            post.get('post_timestamp'),
-            post.get('content_text'),
-            post.get('content_html'),
-            image_urls_json,
-            external_links_json,
-            iframe_urls_json,
-            floor_value
-        )
-        insert_data.append(row_data)
-    
-    return db_manager.execute_many(insert_query, insert_data)
+        insert_data = []
+        post_uuids = []
+        
+        for post in posts:
+            # 生成帖子UUID
+            post_uuid = str(uuid.uuid4())
+            post_uuids.append((post_uuid, post.get('total_reactions', 0)))
+            
+            # 处理floor字段
+            floor_value = post.get('floor')
+            if floor_value is not None:
+                if isinstance(floor_value, str) and floor_value.isdigit():
+                    floor_value = int(floor_value)
+                elif not isinstance(floor_value, int):
+                    floor_value = None
+            
+            # 将列表转换为JSON字符串
+            image_urls_json = json.dumps(post.get('image_urls', []))
+            external_links_json = json.dumps(post.get('external_links', []))
+            iframe_urls_json = json.dumps(post.get('iframe_urls', []))
+            
+            row_data = (
+                post_uuid,                                # uuid
+                thread_uuid,                              # thread_uuid
+                str(post.get('post_id')) if post.get('post_id') is not None else None,  # post_id
+                post.get('author_name'),                  # author_name
+                str(post.get('author_id')) if post.get('author_id') is not None else None,  # author_id
+                post.get('author_profile_url'),           # author_profile_url
+                post.get('post_timestamp'),               # post_timestamp
+                post.get('content_text'),                 # content_text
+                post.get('content_html'),                 # content_html
+                image_urls_json,                          # image_urls
+                external_links_json,                      # external_links
+                iframe_urls_json,                         # iframe_urls
+                floor_value                               # floor
+            )
+            insert_data.append(row_data)
+        
+        # 批量插入帖子数据
+        affected_rows = db_manager.execute_many(insert_query, insert_data)
+        
+        # 3. 插入反应数据
+        _save_reactions_to_database(post_uuids, db_manager)
+        
+        return affected_rows
+        
+    except Exception as e:
+        print(f"同步保存帖子数据时发生错误: {e}")
+        return 0
 
 
 def _update_posts_in_database(posts: List[Dict[str, Any]], thread_title: str, 
-                             thread_url: str, db_manager: PostgreSQLManager) -> int:
+                             thread_url: str, db_manager: PostgreSQLManager, cookies: Optional[dict] = None) -> int:
     """
-    更新修改的帖子到数据库
+    更新修改的帖子到数据库 - 适配新的三表结构
     """
     if not posts:
         return 0
     
-    update_query = """
-        UPDATE simpcity SET
-            thread = %s, thread_url = %s, post_id = %s, author_name = %s, 
-            author_id = %s, author_profile_url = %s, post_timestamp = %s, 
-            content_text = %s, content_html = %s, image_urls = %s, 
-            external_links = %s, iframe_urls = %s
-        WHERE (thread_url = %s OR thread = %s) AND floor = %s
+    try:
+        # 1. 确保线程存在
+        thread_uuid = _ensure_thread_exists(thread_title, thread_url, db_manager, cookies)
+        
+        # 2. 更新帖子数据
+        update_query = """
+            UPDATE simpcity_thread_response SET
+                post_id = %s, author_name = %s, author_id = %s, 
+                author_profile_url = %s, post_timestamp = %s, 
+                content_text = %s, content_html = %s, image_urls = %s, 
+                external_links = %s, iframe_urls = %s, update_time = NOW()
+            WHERE thread_uuid = %s AND floor = %s
+        """
+        
+        updated_count = 0
+        
+        for post in posts:
+            # 处理floor字段
+            floor_value = post.get('floor')
+            if floor_value is not None:
+                if isinstance(floor_value, str) and floor_value.isdigit():
+                    floor_value = int(floor_value)
+                elif not isinstance(floor_value, int):
+                    floor_value = None
+            
+            # 将列表转换为JSON字符串
+            image_urls_json = json.dumps(post.get('image_urls', []))
+            external_links_json = json.dumps(post.get('external_links', []))
+            iframe_urls_json = json.dumps(post.get('iframe_urls', []))
+            
+            row_data = (
+                str(post.get('post_id')) if post.get('post_id') is not None else None,  # post_id
+                post.get('author_name'),                  # author_name
+                str(post.get('author_id')) if post.get('author_id') is not None else None,  # author_id
+                post.get('author_profile_url'),           # author_profile_url
+                post.get('post_timestamp'),               # post_timestamp
+                post.get('content_text'),                 # content_text
+                post.get('content_html'),                 # content_html
+                image_urls_json,                          # image_urls
+                external_links_json,                      # external_links
+                iframe_urls_json,                         # iframe_urls
+                thread_uuid,                              # thread_uuid
+                floor_value                               # floor
+            )
+            
+            updated_count += db_manager.execute_update(update_query, row_data)
+            
+            # 3. 更新反应数据
+            _update_reactions_in_database(post, thread_uuid, db_manager)
+        
+        return updated_count
+        
+    except Exception as e:
+        print(f"更新帖子数据时发生错误: {e}")
+        return 0
+
+
+def _update_reactions_in_database(post: Dict[str, Any], thread_uuid: str, db_manager: PostgreSQLManager) -> int:
     """
+    更新帖子的反应数据
     
-    update_data = []
-    for post in posts:
-        # 处理floor字段
+    Args:
+        post: 帖子数据
+        thread_uuid: 线程UUID
+        db_manager: 数据库管理器
+    
+    Returns:
+        更新的记录数
+    """
+    try:
         floor_value = post.get('floor')
-        if floor_value is not None:
-            if isinstance(floor_value, str) and floor_value.isdigit():
-                floor_value = int(floor_value)
-            elif not isinstance(floor_value, int):
-                floor_value = None
+        reactions_count = post.get('total_reactions', 0)
         
-        # 将列表转换为JSON字符串
-        image_urls_json = json.dumps(post.get('image_urls', []))
-        external_links_json = json.dumps(post.get('external_links', []))
-        iframe_urls_json = json.dumps(post.get('iframe_urls', []))
+        if floor_value is None or reactions_count <= 0:
+            return 0
         
-        row_data = (
-            thread_title,
-            thread_url,
-            post.get('post_id'),
-            post.get('author_name'),
-            post.get('author_id'),
-            post.get('author_profile_url'),
-            post.get('post_timestamp'),
-            post.get('content_text'),
-            post.get('content_html'),
-            image_urls_json,
-            external_links_json,
-            iframe_urls_json,
-            thread_url,
-            thread_title,
-            floor_value
-        )
-        update_data.append(row_data)
+        # 首先获取帖子的UUID
+        get_post_query = """
+            SELECT uuid FROM simpcity_thread_response 
+            WHERE thread_uuid = %s AND floor = %s
+        """
+        post_result = db_manager.execute_one(get_post_query, (thread_uuid, floor_value))
+        
+        if not post_result:
+            return 0
+        
+        post_uuid = str(post_result['uuid'])
+        
+        # 检查反应记录是否存在
+        check_reaction_query = """
+            SELECT uuid FROM simpcity_thread_reactions 
+            WHERE post_uuid = %s
+        """
+        existing_reaction = db_manager.execute_one(check_reaction_query, (post_uuid,))
+        
+        if existing_reaction:
+            # 更新现有反应记录
+            update_reaction_query = """
+                UPDATE simpcity_thread_reactions 
+                SET reactions = %s, update_time = NOW()
+                WHERE post_uuid = %s
+            """
+            return db_manager.execute_update(update_reaction_query, (reactions_count, post_uuid))
+        else:
+            # 插入新的反应记录
+            reaction_uuid = str(uuid.uuid4())
+            insert_reaction_query = """
+                INSERT INTO simpcity_thread_reactions (
+                    uuid, post_uuid, reactions, create_time, update_time
+                ) VALUES (
+                    %s, %s, %s, NOW(), NOW()
+                )
+            """
+            return db_manager.execute_update(insert_reaction_query, (reaction_uuid, post_uuid, reactions_count))
     
-    updated_count = 0
-    for row_data in update_data:
-        updated_count += db_manager.execute_update(update_query, row_data)
-    
-    return updated_count
+    except Exception as e:
+        print(f"更新反应数据时发生错误: {e}")
+        return 0
 
 
 def _mark_posts_as_deleted(deleted_floors: set, thread_url: str, thread_title: str, 
-                          db_manager: PostgreSQLManager) -> int:
+                          db_manager: PostgreSQLManager, cookies: Optional[dict] = None) -> int:
     """
-    标记删除的帖子
-    
-    注意：此方法假设数据库表中有is_deleted字段。
-    如果表中没有此字段，需要先添加该字段：
-    ALTER TABLE simpcity ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;
+    标记删除的帖子 - 适配新的三表结构
     """
     if not deleted_floors:
         return 0
     
-    # 构建批量更新查询
-    placeholders = ','.join(['%s'] * len(deleted_floors))
-    update_query = f"""
-        UPDATE simpcity SET is_deleted = TRUE
-        WHERE (thread_url = %s OR thread = %s) AND floor IN ({placeholders})
-    """
-    
-    # 准备参数
-    params = [thread_url, thread_title] + list(deleted_floors)
-    
     try:
+        # 1. 确保线程存在
+        thread_uuid = _ensure_thread_exists(thread_title, thread_url, db_manager, cookies)
+        
+        # 2. 标记帖子为删除状态
+        placeholders = ','.join(['%s'] * len(deleted_floors))
+        update_query = f"""
+            UPDATE simpcity_thread_response 
+            SET is_deleted = TRUE, delete_time = NOW(), update_time = NOW()
+            WHERE thread_uuid = %s AND floor IN ({placeholders})
+        """
+        
+        # 准备参数
+        params = [thread_uuid] + list(deleted_floors)
+        
         return db_manager.execute_update(update_query, tuple(params))
+        
     except Exception as e:
-        print(f"标记删除失败，可能是因为数据库表中没有is_deleted字段: {e}")
-        print("请先执行SQL: ALTER TABLE simpcity ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;")
+        print(f"标记删除失败: {e}")
         return 0
 
 

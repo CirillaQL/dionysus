@@ -1,0 +1,491 @@
+/* 线程详情页面样式 */
+.thread-detail {
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* 线程详情头部 */
+.thread-detail-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding: 1rem 0;
+  border-bottom: 2px solid #eee;
+}
+
+.back-btn {
+  padding: 0.5rem 1rem;
+  background: #95a5a6;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+  flex-shrink: 0;
+}
+
+.back-btn:hover {
+  background: #7f8c8d;
+}
+
+.thread-detail-title {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.thread-detail-title h1 {
+  margin: 0;
+  color: #2c3e50;
+  font-size: 1.8rem;
+  flex: 1;
+  margin-right: 1rem;
+}
+
+.thread-detail-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+.refresh-btn {
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.refresh-btn:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.refresh-btn:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+.visit-original {
+  padding: 0.5rem 1rem;
+  background: #27ae60;
+  color: white;
+  text-decoration: none;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.visit-original:hover {
+  background: #229954;
+}
+
+/* 状态样式 */
+.loading {
+  text-align: center;
+  padding: 3rem;
+  font-size: 1.1rem;
+  color: #7f8c8d;
+}
+
+.error-message {
+  background: #e74c3c;
+  color: white;
+  padding: 1rem;
+  border-radius: 4px;
+  margin-bottom: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.error-message p {
+  margin: 0;
+}
+
+.retry-btn {
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.retry-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* 帖子统计 */
+.posts-stats {
+  margin-bottom: 1rem;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  text-align: center;
+}
+
+.posts-stats p {
+  margin: 0;
+  font-size: 1.1rem;
+  color: #2c3e50;
+}
+
+/* 帖子列表 */
+.posts-list {
+  display: grid;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+
+/* 帖子卡片 */
+.post-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  transition: box-shadow 0.3s;
+}
+
+.post-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* 帖子头部 */
+.post-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid #ecf0f1;
+}
+
+.post-author {
+  font-weight: 600;
+  color: #2c3e50;
+}
+
+.post-author a {
+  color: #3498db;
+  text-decoration: none;
+  transition: color 0.3s;
+}
+
+.post-author a:hover {
+  color: #2980b9;
+  text-decoration: underline;
+}
+
+.post-meta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  font-size: 0.85rem;
+  color: #7f8c8d;
+}
+
+.post-floor {
+  background: #3498db;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+.post-reactions {
+  background: #f39c12;
+  color: white;
+  padding: 0.2rem 0.5rem;
+  border-radius: 12px;
+  font-weight: 600;
+}
+
+/* 帖子内容 */
+.post-content {
+  margin-bottom: 1rem;
+  line-height: 1.6;
+}
+
+.post-content-html {
+  color: #2c3e50;
+}
+
+.post-content-html img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  margin: 0.5rem 0;
+}
+
+.post-content-html a {
+  color: #3498db;
+  text-decoration: none;
+}
+
+.post-content-html a:hover {
+  text-decoration: underline;
+}
+
+.post-content-text p {
+  margin: 0.5rem 0;
+  color: #2c3e50;
+}
+
+.post-content-empty {
+  color: #95a5a6;
+  font-style: italic;
+  text-align: center;
+  padding: 1rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+}
+
+/* 帖子图片 */
+.post-images {
+  margin-bottom: 1rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.post-image img {
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  transition: transform 0.3s;
+  cursor: pointer;
+}
+
+.post-image img:hover {
+  transform: scale(1.02);
+}
+
+/* 外部链接 */
+.post-links {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  border-left: 3px solid #3498db;
+}
+
+.post-links h5 {
+  margin: 0 0 0.5rem 0;
+  color: #2c3e50;
+  font-size: 0.9rem;
+}
+
+.external-link {
+  display: block;
+  color: #3498db;
+  text-decoration: none;
+  margin: 0.25rem 0;
+  font-size: 0.9rem;
+  word-break: break-all;
+}
+
+.external-link:hover {
+  text-decoration: underline;
+}
+
+/* 嵌入内容 */
+.post-embeds {
+  margin-bottom: 1rem;
+  padding: 0.75rem;
+  background: #f8f9fa;
+  border-radius: 4px;
+  border-left: 3px solid #e74c3c;
+}
+
+.post-embeds h5 {
+  margin: 0 0 0.5rem 0;
+  color: #2c3e50;
+  font-size: 0.9rem;
+}
+
+.embed-container {
+  margin: 0.5rem 0;
+  position: relative;
+  width: 100%;
+  height: 300px;
+}
+
+.embed-container iframe {
+  width: 100%;
+  height: 100%;
+  border: none;
+  border-radius: 4px;
+}
+
+/* 帖子底部 */
+.post-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #ecf0f1;
+  font-size: 0.75rem;
+  color: #95a5a6;
+}
+
+/* 分页样式 */
+.pagination {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.page-btn {
+  padding: 0.5rem 1rem;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  transition: background 0.3s;
+}
+
+.page-btn:hover:not(:disabled) {
+  background: #2980b9;
+}
+
+.page-btn:disabled {
+  background: #bdc3c7;
+  cursor: not-allowed;
+}
+
+.page-info {
+  background: #ecf0f1;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  font-size: 0.9rem;
+  color: #2c3e50;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .thread-detail-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .thread-detail-title {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+  }
+
+  .thread-detail-title h1 {
+    font-size: 1.4rem;
+    margin-right: 0;
+  }
+
+  .thread-detail-actions {
+    justify-content: center;
+  }
+
+  .post-header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.5rem;
+  }
+
+  .post-meta {
+    justify-content: space-between;
+  }
+
+  .post-images {
+    grid-template-columns: 1fr;
+  }
+
+  .post-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.25rem;
+  }
+
+  .embed-container {
+    height: 200px;
+  }
+}
+
+/* 深色模式 */
+@media (prefers-color-scheme: dark) {
+  .thread-detail {
+    background: #1a1a1a;
+    color: #e1e1e1;
+  }
+
+  .thread-detail-header {
+    border-bottom-color: #333;
+  }
+
+  .thread-detail-title h1 {
+    color: #e1e1e1;
+  }
+
+  .post-card {
+    background: #2d2d2d;
+    border-color: #444;
+  }
+
+  .post-header {
+    border-bottom-color: #444;
+  }
+
+  .post-author {
+    color: #e1e1e1;
+  }
+
+  .post-content-html,
+  .post-content-text p {
+    color: #e1e1e1;
+  }
+
+  .post-content-empty {
+    background: #1a1a1a;
+    color: #95a5a6;
+  }
+
+  .post-links,
+  .post-embeds {
+    background: #1a1a1a;
+  }
+
+  .post-links h5,
+  .post-embeds h5 {
+    color: #e1e1e1;
+  }
+
+  .post-footer {
+    border-top-color: #444;
+  }
+
+  .posts-stats {
+    background: #2d2d2d;
+    color: #e1e1e1;
+  }
+
+  .posts-stats p {
+    color: #e1e1e1;
+  }
+
+  .page-info {
+    background: #2d2d2d;
+    color: #e1e1e1;
+  }
+} 
