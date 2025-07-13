@@ -1,5 +1,30 @@
 import { useState, useEffect } from 'react'
-import './ThreadDetail.css'
+import { 
+  Card, 
+  Button, 
+  Tag, 
+  Avatar, 
+  Spin,
+  Pagination,
+  message,
+  Empty,
+  Image,
+  Divider,
+  Space,
+  Typography,
+  Row,
+  Col
+} from 'antd'
+import { 
+  ArrowLeftOutlined,
+  ReloadOutlined,
+  LinkOutlined,
+  UserOutlined,
+  CalendarOutlined,
+  HeartOutlined
+} from '@ant-design/icons'
+
+const { Title, Text, Paragraph } = Typography
 
 // 定义帖子数据类型
 interface PostInfo {
@@ -67,7 +92,9 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
         throw new Error(data.message || '获取帖子列表失败')
       }
     } catch (err) {
-      setError(err instanceof Error ? err.message : '未知错误')
+      const errorMessage = err instanceof Error ? err.message : '未知错误'
+      setError(errorMessage)
+      message.error(errorMessage)
     } finally {
       setLoading(false)
     }
@@ -89,11 +116,8 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
   }
 
   // 处理分页
-  const totalPages = Math.ceil(totalCount / itemsPerPage)
   const handlePageChange = (page: number) => {
-    if (page >= 1 && page <= totalPages) {
-      fetchPosts(page)
-    }
+    fetchPosts(page)
   }
 
   // 刷新数据
@@ -106,168 +130,230 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
     if (post.content_html) {
       return (
         <div 
-          className="post-content-html"
+          style={{ 
+            maxWidth: '100%', 
+            wordBreak: 'break-word',
+            lineHeight: '1.6'
+          }}
           dangerouslySetInnerHTML={{ __html: post.content_html }}
         />
       )
     } else if (post.content_text) {
       return (
-        <div className="post-content-text">
-          {post.content_text.split('\n').map((line, idx) => (
-            <p key={idx}>{line}</p>
-          ))}
-        </div>
+        <Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+          {post.content_text}
+        </Paragraph>
       )
     }
-    return <div className="post-content-empty">无内容</div>
+    return (
+      <Text type="secondary" italic>
+        无内容
+      </Text>
+    )
   }
 
   return (
-    <div className="thread-detail">
-      <header className="thread-detail-header">
-        <button onClick={onBack} className="back-btn">
-          ← 返回列表
-        </button>
-        <div className="thread-detail-title">
-          <h1>{threadTitle}</h1>
-          <div className="thread-detail-actions">
-            <button onClick={handleRefresh} disabled={loading} className="refresh-btn">
-              {loading ? '刷新中...' : '刷新'}
-            </button>
-            <a href={threadUrl} target="_blank" rel="noopener noreferrer" className="visit-original">
-              访问原帖
-            </a>
-          </div>
-        </div>
-      </header>
-
-      {error && (
-        <div className="error-message">
-          <p>错误: {error}</p>
-          <button onClick={handleRefresh} className="retry-btn">重试</button>
-        </div>
-      )}
-
-      {loading && !error && (
-        <div className="loading">
-          <p>加载中...</p>
-        </div>
-      )}
-
-      {!loading && !error && (
-        <>
-          <div className="posts-stats">
-            <p>共 {totalCount} 个帖子</p>
-          </div>
-
-          <div className="posts-list">
-            {posts.map((post) => (
-              <div key={post.uuid} className="post-card">
-                <div className="post-header">
-                  <div className="post-author">
-                    {post.author_profile_url ? (
-                      <a href={post.author_profile_url} target="_blank" rel="noopener noreferrer">
-                        {post.author_name || '匿名用户'}
-                      </a>
-                    ) : (
-                      <span>{post.author_name || '匿名用户'}</span>
-                    )}
-                  </div>
-                  <div className="post-meta">
-                    <span className="post-floor">#{post.floor}</span>
-                    <span className="post-time">{formatDate(post.post_timestamp)}</span>
-                    {post.reactions && post.reactions > 0 && (
-                      <span className="post-reactions">👍 {post.reactions}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="post-content">
-                  {renderPostContent(post)}
-                </div>
-
-                {/* 显示图片 */}
-                {post.image_urls && post.image_urls.length > 0 && (
-                  <div className="post-images">
-                    {post.image_urls.map((url, idx) => (
-                      <div key={idx} className="post-image">
-                        <img 
-                          src={url} 
-                          alt={`图片 ${idx + 1}`}
-                          loading="lazy"
-                          onError={(e) => {
-                            e.currentTarget.style.display = 'none'
-                          }}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* 显示外部链接 */}
-                {post.external_links && post.external_links.length > 0 && (
-                  <div className="post-links">
-                    <h5>外部链接:</h5>
-                    {post.external_links.map((link, idx) => (
-                      <a key={idx} href={link} target="_blank" rel="noopener noreferrer" className="external-link">
-                        {link}
-                      </a>
-                    ))}
-                  </div>
-                )}
-
-                {/* 显示视频/嵌入内容 */}
-                {post.iframe_urls && post.iframe_urls.length > 0 && (
-                  <div className="post-embeds">
-                    <h5>嵌入内容:</h5>
-                    {post.iframe_urls.map((url, idx) => (
-                      <div key={idx} className="embed-container">
-                        <iframe 
-                          src={url} 
-                          title={`嵌入内容 ${idx + 1}`}
-                          loading="lazy"
-                          sandbox="allow-scripts allow-same-origin"
-                        />
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                <div className="post-footer">
-                  <small>UUID: {post.uuid}</small>
-                  {post.post_id && (
-                    <small>Post ID: {post.post_id}</small>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {totalPages > 1 && (
-            <div className="pagination">
-              <button 
-                onClick={() => handlePageChange(currentPage - 1)}
-                disabled={currentPage === 1}
-                className="page-btn"
+    <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
+      {/* 头部 */}
+      <div style={{ 
+        backgroundColor: '#fff', 
+        borderBottom: '1px solid #e8e8e8',
+        position: 'sticky',
+        top: 0,
+        zIndex: 1000
+      }}>
+        <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '0 24px' }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'center', 
+            padding: '16px 0' 
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+              <Button
+                icon={<ArrowLeftOutlined />}
+                onClick={onBack}
               >
-                上一页
-              </button>
-              
-              <div className="page-info">
-                <span>第 {currentPage} 页，共 {totalPages} 页</span>
-              </div>
-              
-              <button 
-                onClick={() => handlePageChange(currentPage + 1)}
-                disabled={currentPage === totalPages}
-                className="page-btn"
-              >
-                下一页
-              </button>
+                返回列表
+              </Button>
+              <Title level={3} style={{ margin: 0 }} ellipsis={{ tooltip: threadTitle }}>
+                {threadTitle}
+              </Title>
             </div>
-          )}
-        </>
-      )}
+            <Space>
+              <Button
+                icon={<ReloadOutlined />}
+                onClick={handleRefresh}
+                loading={loading}
+              >
+                刷新
+              </Button>
+              <Button
+                type="primary"
+                icon={<LinkOutlined />}
+                onClick={() => window.open(threadUrl, '_blank')}
+              >
+                访问原帖
+              </Button>
+            </Space>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
+        {/* 统计信息 */}
+        {!loading && !error && (
+          <div style={{ marginBottom: '24px' }}>
+            <Text type="secondary">共 {totalCount} 个帖子</Text>
+          </div>
+        )}
+
+        {/* 加载状态 */}
+        {loading && (
+          <div style={{ textAlign: 'center', padding: '80px 0' }}>
+            <Spin size="large" tip="加载中..." />
+          </div>
+        )}
+
+        {/* 错误状态 */}
+        {error && !loading && (
+          <Empty 
+            description={`错误: ${error}`}
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+          >
+            <Button type="primary" onClick={handleRefresh}>
+              重试
+            </Button>
+          </Empty>
+        )}
+
+        {/* 帖子列表 */}
+        {!loading && !error && posts.length > 0 && (
+          <div style={{ marginBottom: '24px' }}>
+            <Space direction="vertical" size="large" style={{ width: '100%' }}>
+              {posts.map((post) => (
+                <Card key={post.uuid} style={{ width: '100%' }}>
+                  {/* 帖子头部 */}
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'space-between', 
+                    alignItems: 'center', 
+                    marginBottom: '16px' 
+                  }}>
+                    <Space>
+                      <Avatar
+                        size="large"
+                        icon={<UserOutlined />}
+                      />
+                      <div>
+                        {post.author_profile_url ? (
+                          <a
+                            href={post.author_profile_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{ color: '#1677ff', fontWeight: 'bold' }}
+                          >
+                            {post.author_name || '匿名用户'}
+                          </a>
+                        ) : (
+                          <Text strong>{post.author_name || '匿名用户'}</Text>
+                        )}
+                        <div>
+                          <Space>
+                            <Text type="secondary" style={{ fontSize: '12px' }}>
+                              <CalendarOutlined /> {formatDate(post.post_timestamp)}
+                            </Text>
+                            {post.floor && (
+                              <Tag color="blue">#{post.floor}</Tag>
+                            )}
+                          </Space>
+                        </div>
+                      </div>
+                    </Space>
+                    
+                    {post.reactions && post.reactions > 0 && (
+                      <Space>
+                        <HeartOutlined style={{ color: '#ff4d4f' }} />
+                        <Text type="secondary">{post.reactions}</Text>
+                      </Space>
+                    )}
+                  </div>
+
+                  <Divider />
+
+                  {/* 帖子内容 */}
+                  <div style={{ marginBottom: '16px' }}>
+                    {renderPostContent(post)}
+                  </div>
+
+                  {/* 图片展示 */}
+                  {post.image_urls && post.image_urls.length > 0 && (
+                    <div style={{ marginBottom: '16px' }}>
+                      <Image.PreviewGroup>
+                        <Row gutter={[8, 8]}>
+                          {post.image_urls.map((url, index) => (
+                            <Col xs={12} sm={8} md={6} key={index}>
+                              <Image
+                                src={url}
+                                alt={`图片 ${index + 1}`}
+                                width="100%"
+                                height="120px"
+                                style={{ objectFit: 'cover' }}
+                                fallback="/api/placeholder/120/120"
+                              />
+                            </Col>
+                          ))}
+                        </Row>
+                      </Image.PreviewGroup>
+                    </div>
+                  )}
+
+                  {/* 外部链接 */}
+                  {post.external_links && post.external_links.length > 0 && (
+                    <div style={{ marginBottom: '8px' }}>
+                      <Text type="secondary">外部链接：</Text>
+                      <Space wrap>
+                        {post.external_links.map((link, index) => (
+                          <Tag 
+                            key={index} 
+                            color="cyan" 
+                            style={{ cursor: 'pointer' }}
+                            onClick={() => window.open(link, '_blank')}
+                          >
+                            <LinkOutlined /> 链接 {index + 1}
+                          </Tag>
+                        ))}
+                      </Space>
+                    </div>
+                  )}
+                </Card>
+              ))}
+            </Space>
+          </div>
+        )}
+
+        {/* 空状态 */}
+        {!loading && !error && posts.length === 0 && (
+          <Empty description="暂无帖子数据" />
+        )}
+
+        {/* 分页 */}
+        {!loading && !error && totalCount > itemsPerPage && (
+          <div style={{ textAlign: 'center', marginTop: '24px' }}>
+            <Pagination
+              current={currentPage}
+              total={totalCount}
+              pageSize={itemsPerPage}
+              onChange={handlePageChange}
+              showSizeChanger={false}
+              showQuickJumper
+              showTotal={(total, range) => 
+                `第 ${range[0]}-${range[1]} 条，共 ${total} 条`
+              }
+            />
+          </div>
+        )}
+      </div>
     </div>
   )
 }
