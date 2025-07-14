@@ -51,29 +51,61 @@ def scrape_post_reactions(post_id: int, base_url: str, session: Optional[request
     
     reactions_url = urljoin(base_url, f'posts/{post_id}/reactions')
     
-    try:
-        response = session.get(reactions_url, timeout=10)
-        response.raise_for_status()
-        
-        soup = BeautifulSoup(response.text, 'html.parser')
-        
-        # 查找"All"标签页，获取总反应数
-        all_tab = soup.select_one('h3.tabs a.tabs-tab.is-active')
-        if all_tab:
-            tab_text = all_tab.get_text(strip=True)
-            # 解析 "All (287)" 格式
-            if '(' in tab_text and ')' in tab_text:
-                count_str = tab_text.split('(')[1].split(')')[0].strip()
-                try:
-                    return int(count_str)
-                except ValueError:
-                    pass
-        
-        return 0
-        
-    except Exception as e:
-        print(f"获取帖子 {post_id} 的reactions失败: {e}")
-        return 0
+    # 添加随机等待时间，避免请求过频繁
+    wait_time = random.uniform(1, 3)
+    print(f"等待 {wait_time:.2f} 秒后抓取帖子 {post_id} 的reactions...")
+    time.sleep(wait_time)
+    
+    # 重试逻辑
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            response = session.get(reactions_url, timeout=10)
+            
+            # 特殊处理429错误
+            if response.status_code == 429:
+                if attempt < max_retries - 1:
+                    # 计算退避等待时间：基础时间 + 指数退避 + 随机扰动
+                    backoff_time = 10 * (2 ** attempt) + random.uniform(5, 15)
+                    print(f"触发429限制，等待 {backoff_time:.2f} 秒后重试... (尝试 {attempt + 1}/{max_retries})")
+                    time.sleep(backoff_time)
+                    continue
+                else:
+                    print(f"多次尝试后仍触发429限制，跳过帖子 {post_id} 的reactions抓取")
+                    return 0
+            
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            
+            # 查找"All"标签页，获取总反应数
+            all_tab = soup.select_one('h3.tabs a.tabs-tab.is-active')
+            if all_tab:
+                tab_text = all_tab.get_text(strip=True)
+                # 解析 "All (287)" 格式
+                if '(' in tab_text and ')' in tab_text:
+                    count_str = tab_text.split('(')[1].split(')')[0].strip()
+                    try:
+                        return int(count_str)
+                    except ValueError:
+                        pass
+            
+            return 0
+            
+        except requests.exceptions.RequestException as e:
+            if attempt < max_retries - 1:
+                wait_time = random.uniform(3, 8)
+                print(f"请求失败，等待 {wait_time:.2f} 秒后重试... (尝试 {attempt + 1}/{max_retries})")
+                time.sleep(wait_time)
+                continue
+            else:
+                print(f"获取帖子 {post_id} 的reactions失败: {e}")
+                return 0
+        except Exception as e:
+            print(f"获取帖子 {post_id} 的reactions失败: {e}")
+            return 0
+    
+    return 0
 
 
 def parse_post_enhanced(post_tag: Tag, base_url: str, session: Optional[requests.Session] = None, enable_reactions: bool = True) -> Dict[str, Any]:
@@ -475,7 +507,7 @@ def _ensure_thread_exists(thread_title: str, thread_url: str, db_manager: Postgr
             
             db_manager.execute_update(insert_query, (
                 thread_uuid,
-                metadata['title'] or thread_title,
+                thread_title or metadata['title'],  # 改为优先使用用户传入的标题
                 categories_array,
                 tags_array,
                 thread_url,

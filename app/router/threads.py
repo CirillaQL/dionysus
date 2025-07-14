@@ -34,7 +34,7 @@ class ThreadsListResponse(BaseModel):
     data: List[ThreadInfo]
     total_count: int
 
-@router.get("/", response_model=ThreadsListResponse)
+@router.get("/list", response_model=ThreadsListResponse)
 async def list_threads(
     limit: int = 50,
     offset: int = 0,

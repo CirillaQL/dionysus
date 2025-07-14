@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
 import { 
   Card, 
   Button, 
@@ -54,29 +55,79 @@ interface PostsResponse {
   total_count: number
 }
 
-interface ThreadDetailProps {
-  threadId: number
-  threadTitle: string
-  threadUrl: string
-  onBack: () => void
+// 定义线程信息类型
+interface ThreadInfo {
+  id: number
+  thread_title: string
+  thread_url: string
+  thread_uuid: string
+  categories: string[] | null
+  tags: string[] | null
+  avatar_img: string | null
+  description: string | null
+  create_time: string
+  update_time: string
+  posts_count: number
+  latest_post_timestamp: string | null
+  first_post_timestamp: string | null
+  authors_count: number
 }
 
-function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetailProps) {
+interface ThreadResponse {
+  success: boolean
+  message: string
+  data: ThreadInfo
+}
+
+function ThreadDetail() {
+  const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
+  
+  const [threadInfo, setThreadInfo] = useState<ThreadInfo | null>(null)
   const [posts, setPosts] = useState<PostInfo[]>([])
   const [loading, setLoading] = useState(true)
+  const [threadLoading, setThreadLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const itemsPerPage = 10
 
+  // 获取线程信息
+  const fetchThreadInfo = async (threadId: string) => {
+    try {
+      setThreadLoading(true)
+      const response = await fetch(`/api/threads/id/${threadId}`)
+      
+      if (!response.ok) {
+        throw new Error(`请求失败: ${response.status}`)
+      }
+      
+      const data: ThreadResponse = await response.json()
+      
+      if (data.success) {
+        setThreadInfo(data.data)
+      } else {
+        throw new Error(data.message || '获取线程信息失败')
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '未知错误'
+      setError(errorMessage)
+      message.error(errorMessage)
+    } finally {
+      setThreadLoading(false)
+    }
+  }
+
   // 获取帖子列表
   const fetchPosts = async (page: number = 1) => {
+    if (!id) return
+    
     try {
       setLoading(true)
       setError(null)
       
       const offset = (page - 1) * itemsPerPage
-      const response = await fetch(`/api/threads/id/${threadId}/posts?limit=${itemsPerPage}&offset=${offset}`)
+      const response = await fetch(`/api/threads/id/${id}/posts?limit=${itemsPerPage}&offset=${offset}`)
       
       if (!response.ok) {
         throw new Error(`请求失败: ${response.status}`)
@@ -102,8 +153,11 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
 
   // 组件加载时获取数据
   useEffect(() => {
-    fetchPosts(1)
-  }, [threadId])
+    if (id) {
+      fetchThreadInfo(id)
+      fetchPosts(1)
+    }
+  }, [id])
 
   // 格式化时间
   const formatDate = (timestamp: number | null) => {
@@ -122,7 +176,15 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
 
   // 刷新数据
   const handleRefresh = () => {
-    fetchPosts(currentPage)
+    if (id) {
+      fetchThreadInfo(id)
+      fetchPosts(currentPage)
+    }
+  }
+
+  // 返回列表
+  const handleBack = () => {
+    navigate('/')
   }
 
   // 渲染帖子内容
@@ -152,6 +214,15 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
     )
   }
 
+  // 如果没有ID参数，显示错误
+  if (!id) {
+    return (
+      <div style={{ textAlign: 'center', padding: '80px 0' }}>
+        <Empty description="无效的线程ID" />
+      </div>
+    )
+  }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
       {/* 头部 */}
@@ -172,29 +243,35 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
             <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
               <Button
                 icon={<ArrowLeftOutlined />}
-                onClick={onBack}
+                onClick={handleBack}
               >
                 返回列表
               </Button>
-              <Title level={3} style={{ margin: 0 }} ellipsis={{ tooltip: threadTitle }}>
-                {threadTitle}
-              </Title>
+              {threadLoading ? (
+                <Spin size="small" />
+              ) : (
+                <Title level={3} style={{ margin: 0 }} ellipsis={{ tooltip: threadInfo?.thread_title }}>
+                  {threadInfo?.thread_title || '加载中...'}
+                </Title>
+              )}
             </div>
             <Space>
               <Button
                 icon={<ReloadOutlined />}
                 onClick={handleRefresh}
-                loading={loading}
+                loading={loading || threadLoading}
               >
                 刷新
               </Button>
-              <Button
-                type="primary"
-                icon={<LinkOutlined />}
-                onClick={() => window.open(threadUrl, '_blank')}
-              >
-                访问原帖
-              </Button>
+              {threadInfo && (
+                <Button
+                  type="primary"
+                  icon={<LinkOutlined />}
+                  onClick={() => window.open(threadInfo.thread_url, '_blank')}
+                >
+                  访问原帖
+                </Button>
+              )}
             </Space>
           </div>
         </div>
@@ -293,14 +370,26 @@ function ThreadDetail({ threadId, threadTitle, threadUrl, onBack }: ThreadDetail
                         <Row gutter={[8, 8]}>
                           {post.image_urls.map((url, index) => (
                             <Col xs={12} sm={8} md={6} key={index}>
-                              <Image
-                                src={url}
-                                alt={`图片 ${index + 1}`}
-                                width="100%"
-                                height="120px"
-                                style={{ objectFit: 'cover' }}
-                                fallback="/api/placeholder/120/120"
-                              />
+                              <div style={{ 
+                                border: '1px solid #e8e8e8',
+                                borderRadius: '6px',
+                                overflow: 'hidden',
+                                height: '120px',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                backgroundColor: '#f9f9f9'
+                              }}>
+                                <Image
+                                  src={url}
+                                  alt={`图片 ${index + 1}`}
+                                  style={{ 
+                                    maxWidth: '100%',
+                                    maxHeight: '100%',
+                                    objectFit: 'contain'
+                                  }}
+                                />
+                              </div>
                             </Col>
                           ))}
                         </Row>
