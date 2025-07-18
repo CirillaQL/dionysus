@@ -27,7 +27,8 @@ import {
   UserOutlined,
   CalendarOutlined,
   MessageOutlined,
-  PlusOutlined
+  PlusOutlined,
+  SyncOutlined
 } from '@ant-design/icons'
 
 const { Title, Text } = Typography
@@ -76,6 +77,11 @@ function ThreadList() {
   const [crawlerModalVisible, setCrawlerModalVisible] = useState(false)
   const [crawlerLoading, setCrawlerLoading] = useState(false)
   const [crawlerForm] = Form.useForm()
+  const [syncModalVisible, setSyncModalVisible] = useState(false)
+  const [syncLoading, setSyncLoading] = useState(false)
+  const [syncForm] = Form.useForm()
+  const [currentSyncThread, setCurrentSyncThread] = useState<ThreadInfo | null>(null)
+  const [syncingThreads, setSyncingThreads] = useState<Set<number>>(new Set())
   const navigate = useNavigate()
   
   const itemsPerPage = 20
@@ -200,6 +206,76 @@ function ThreadList() {
     crawlerForm.resetFields()
   }
 
+  // 处理线程同步 - 修改为显示弹窗
+  const handleSync = (thread: ThreadInfo) => {
+    setCurrentSyncThread(thread)
+    setSyncModalVisible(true)
+    // 设置表单默认值
+    syncForm.setFieldsValue({
+      thread_url: thread.thread_url,
+      thread_title: thread.thread_title,
+      enable_reactions: true,
+      save_to_db: true,
+      config_path: 'config.yaml'
+    })
+  }
+
+  // 提交同步请求
+  const handleSyncSubmit = async (values: CrawlerRequest) => {
+    if (!currentSyncThread) return
+
+    try {
+      setSyncLoading(true)
+      // 添加到同步中的线程集合
+      setSyncingThreads(prev => new Set([...prev, currentSyncThread.id]))
+      
+      const response = await fetch('/api/sync', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(values)
+      })
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
+      const result = await response.json()
+      
+      if (result.success) {
+        message.success(`线程 "${currentSyncThread.thread_title}" 同步成功`)
+        setSyncModalVisible(false)
+        syncForm.resetFields()
+        setCurrentSyncThread(null)
+        // 刷新列表以获取最新数据
+        await fetchThreads(currentPage)
+      } else {
+        throw new Error(result.message || '同步失败')
+      }
+    } catch (err) {
+      console.error('同步失败:', err)
+      message.error(err instanceof Error ? err.message : '同步失败')
+    } finally {
+      setSyncLoading(false)
+      // 从同步中的线程集合中移除
+      if (currentSyncThread) {
+        setSyncingThreads(prev => {
+          const newSet = new Set(prev)
+          newSet.delete(currentSyncThread.id)
+          return newSet
+        })
+      }
+    }
+  }
+
+  // 取消同步弹窗
+  const handleSyncCancel = () => {
+    setSyncModalVisible(false)
+    syncForm.resetFields()
+    setCurrentSyncThread(null)
+  }
+
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f5f5f5' }}>
       {/* 头部 */}
@@ -316,6 +392,83 @@ function ThreadList() {
         </Form>
       </Modal>
 
+      {/* 同步线程弹窗 */}
+      <Modal
+        title={`同步线程 - ${currentSyncThread?.thread_title || ''}`}
+        open={syncModalVisible}
+        onOk={syncForm.submit}
+        onCancel={handleSyncCancel}
+        confirmLoading={syncLoading}
+        width={600}
+        okText="开始同步"
+        cancelText="取消"
+      >
+        <Form
+          form={syncForm}
+          layout="vertical"
+          onFinish={handleSyncSubmit}
+        >
+          <Form.Item
+            label="帖子URL"
+            name="thread_url"
+            rules={[
+              { required: true, message: '请输入帖子URL' },
+              { type: 'url', message: '请输入有效的URL' }
+            ]}
+          >
+            <Input 
+              placeholder="请输入帖子的完整URL，例如：https://simpcity.su/threads/xxx"
+              size="large"
+              disabled
+            />
+          </Form.Item>
+
+          <Form.Item
+            label="帖子标题"
+            name="thread_title"
+            help="将同步此线程的最新内容"
+          >
+            <Input 
+              placeholder="帖子标题"
+              size="large"
+              disabled
+            />
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={12}>
+              <Form.Item
+                label="启用reactions抓取"
+                name="enable_reactions"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label="保存到数据库"
+                name="save_to_db"
+                valuePropName="checked"
+              >
+                <Switch />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            label="配置文件路径"
+            name="config_path"
+            help="配置文件的路径，包含cookies和其他配置信息"
+          >
+            <Input 
+              placeholder="config.yaml"
+              size="large"
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
+
       <div style={{ maxWidth: '1200px', margin: '0 auto', padding: '24px' }}>
         {/* 统计信息 */}
         {!loading && !error && (
@@ -362,6 +515,16 @@ function ThreadList() {
                         <LinkOutlined 
                           key="link" 
                           onClick={() => window.open(thread.thread_url, '_blank')}
+                        />
+                      </Tooltip>,
+                      <Tooltip title="同步线程">
+                        <SyncOutlined 
+                          key="sync" 
+                          onClick={() => handleSync(thread)}
+                          spin={syncingThreads.has(thread.id)}
+                          style={{ 
+                            color: syncingThreads.has(thread.id) ? '#1677ff' : undefined 
+                          }}
                         />
                       </Tooltip>
                     ]}
