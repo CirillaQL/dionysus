@@ -319,51 +319,82 @@ def scrape_xenforo_thread_with_requests(start_url: str, cookies: dict, enable_re
     session.cookies.update(cookies)
     
     all_posts: List[Dict[str, Any]] = []
-    current_url: Optional[str] = start_url
-    page_num = 1
     total_posts_count = 0
-    while current_url:
-        print(f"正在爬取第 {page_num} 页: {current_url}")
+
+    # 获取页面总数
+    first_page_response = session.get(start_url, timeout=15)
+    first_page_response.raise_for_status()
+    first_page_soup = BeautifulSoup(first_page_response.text, 'html.parser')
+    print(first_page_soup)
+    # 1. 找到分页导航
+    page_nav = first_page_soup.find('div', class_='pageNav')
+    if not page_nav or not isinstance(page_nav, Tag):
+        print('未找到分页导航，可能只有一页')
+        page_count = 1
+    else:
+        # 2. 提取所有页码
+        page_numbers = []
+        for a in page_nav.find_all('a'):
+            text = a.get_text(strip=True)
+            if text.isdigit():
+                page_numbers.append(int(text))
+        # 3. 取最大值
+        page_count = max(page_numbers) if page_numbers else 1
+    
+    print(f'检测到总页数: {page_count}')
+
+    print(page_count)
+
+    # 使用for循环遍历所有页面
+    for page_num in range(1, page_count + 1):
+        # 生成当前页面的URL
+        if page_num == 1:
+            # 第一页不需要添加page信息
+            current_url = start_url
+        else:
+            # 后续页面添加page-X格式
+            if start_url.endswith('/'):
+                current_url = f"{start_url}page-{page_num}"
+            else:
+                current_url = f"{start_url}/page-{page_num}"
+        
+        print(f"正在爬取第 {page_num}/{page_count} 页: {current_url}")
+        
         try:
             # 增加请求超时，提高程序健壮性
             response = session.get(current_url, timeout=15)
             response.raise_for_status() 
             soup = BeautifulSoup(response.text, 'html.parser')
+            
             # 使用更精确的选择器，避免选中非帖子内容
             posts_on_page = soup.select('article.message.message--post')
             if not posts_on_page:
-                print("在此页面上未找到帖子，爬取结束。")
-                break
-            print(f"在此页面找到 {len(posts_on_page)} 个帖子，正在解析...")
+                print(f"在第 {page_num} 页未找到帖子，跳过此页。")
+                continue
+                
+            print(f"在第 {page_num} 页找到 {len(posts_on_page)} 个帖子，正在解析...")
             for post_tag in posts_on_page:
                 post_data = parse_post_enhanced(post_tag, base_url, session, enable_reactions)
                 all_posts.append(post_data)
             total_posts_count += len(posts_on_page)
-            # 翻页逻辑
-            next_page_tag = soup.select_one('a.pageNav-jump--next')
             
-            if next_page_tag and isinstance(next_page_tag, Tag) and next_page_tag.has_attr('href'):
-                relative_url = str(next_page_tag['href'])
-                current_url = urljoin(base_url, relative_url)
-                page_num += 1
-                # 维持原来的随机休眠
+            # 维持原来的随机休眠（除了最后一页）
+            if page_num < page_count:
                 sleep_duration = random.uniform(3, 7)
-                print(f"找到下一页。为防止触发反爬，等待 {sleep_duration:.2f} 秒...")
+                print(f"等待 {sleep_duration:.2f} 秒后继续爬取下一页...")
                 time.sleep(sleep_duration)
-            else:
-                print("未找到'Next'链接，已到达帖子末尾。")
-                current_url = None
+                
         except requests.exceptions.Timeout:
-            print(f"网络请求超时，URL: {current_url}。请检查网络或增加超时时间。")
-            break
+            print(f"网络请求超时，URL: {current_url}。跳过此页继续。")
+            continue
         except requests.exceptions.RequestException as e:
-            print(f"网络请求失败: {e}")
-            break
+            print(f"网络请求失败: {e}，跳过此页继续。")
+            continue
         except Exception as e:
-            print(f"处理页面时发生未知错误: {e}")
-            break
+            print(f"处理第 {page_num} 页时发生未知错误: {e}，跳过此页继续。")
+            continue 
     
-    print(f"\n爬取完成！总共爬取了 {page_num-1 if page_num > 1 else 1} 页，获取了 {total_posts_count} 个帖子。")
+    print(f"\n爬取完成！总共爬取了 {page_count} 页，获取了 {total_posts_count} 个帖子。")
     return all_posts
 
 
