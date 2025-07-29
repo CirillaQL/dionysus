@@ -14,7 +14,9 @@ import {
   Space,
   Typography,
   Row,
-  Col
+  Col,
+  Modal,
+  List
 } from 'antd'
 import { 
   ArrowLeftOutlined,
@@ -22,7 +24,9 @@ import {
   LinkOutlined,
   UserOutlined,
   CalendarOutlined,
-  HeartOutlined
+  HeartOutlined,
+  DownloadOutlined,
+  CloudDownloadOutlined
 } from '@ant-design/icons'
 
 const { Title, Text, Paragraph } = Typography
@@ -79,6 +83,25 @@ interface ThreadResponse {
   data: ThreadInfo
 }
 
+// 下载响应类型
+interface DownloadResponse {
+  success: boolean
+  message: string
+  post_id: string
+  thread_url: string
+  bunkr_links_found: number
+  download_results: Array<{
+    url: string
+    result: {
+      success: boolean
+      error?: string
+      files_downloaded?: number
+      downloaded_files?: string[]
+    }
+  }>
+  errors: string[]
+}
+
 function ThreadDetail() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -91,6 +114,84 @@ function ThreadDetail() {
   const [currentPage, setCurrentPage] = useState(1)
   const [totalCount, setTotalCount] = useState(0)
   const itemsPerPage = 10
+
+  // 下载相关状态
+  const [downloadingPosts, setDownloadingPosts] = useState<Set<string>>(new Set())
+  const [showDownloadModal, setShowDownloadModal] = useState(false)
+  const [downloadResults, setDownloadResults] = useState<DownloadResponse | null>(null)
+
+  // 检查是否为bunkr链接
+  const isBunkrLink = (url: string): boolean => {
+    return /bunkr\.\w+/.test(url)
+  }
+
+  // 获取bunkr链接数量
+  const getBunkrLinksCount = (externalLinks: string[]): number => {
+    return externalLinks.filter(isBunkrLink).length
+  }
+
+  // 下载帖子的bunkr链接
+  const downloadPostBunkrLinks = async (post: PostInfo, useSync: boolean = false) => {
+    if (!post.post_id || !threadInfo?.thread_url) {
+      message.error('帖子信息不完整，无法下载')
+      return
+    }
+
+    const bunkrCount = getBunkrLinksCount(post.external_links)
+    if (bunkrCount === 0) {
+      message.info('该帖子没有bunkr链接可供下载')
+      return
+    }
+
+    const postId = post.post_id
+    setDownloadingPosts(prev => new Set(prev).add(postId))
+
+    try {
+      const endpoint = useSync ? '/api/threads/download-sync' : '/api/threads/download'
+      const response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          thread_url: threadInfo.thread_url,
+          post_id: postId,
+          download_dir: 'downloads'
+        }),
+      })
+
+      if (!response.ok) {
+        throw new Error(`下载请求失败: ${response.status}`)
+      }
+
+      const result: DownloadResponse = await response.json()
+
+      if (result.success) {
+        if (useSync) {
+          // 同步下载，显示详细结果
+          setDownloadResults(result)
+          setShowDownloadModal(true)
+          const successCount = result.download_results.filter(r => r.result.success).length
+          message.success(`下载完成！成功: ${successCount}/${result.bunkr_links_found}`)
+        } else {
+          // 异步下载，只显示启动消息
+          message.success(`找到 ${result.bunkr_links_found} 个bunkr链接，下载已在后台启动`)
+        }
+      } else {
+        throw new Error(result.message || '下载失败')
+      }
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : '下载失败'
+      message.error(errorMessage)
+      console.error('下载错误:', err)
+    } finally {
+      setDownloadingPosts(prev => {
+        const newSet = new Set(prev)
+        newSet.delete(postId)
+        return newSet
+      })
+    }
+  }
 
   // 获取线程信息
   const fetchThreadInfo = async (threadId: string) => {
@@ -399,20 +500,64 @@ function ThreadDetail() {
 
                   {/* 外部链接 */}
                   {post.external_links && post.external_links.length > 0 && (
-                    <div style={{ marginBottom: '8px' }}>
-                      <Text type="secondary">外部链接：</Text>
+                    <div style={{ marginBottom: '16px' }}>
+                      <div style={{ 
+                        display: 'flex', 
+                        justifyContent: 'space-between', 
+                        alignItems: 'center', 
+                        marginBottom: '8px' 
+                      }}>
+                        <Text type="secondary">
+                          外部链接：
+                          {getBunkrLinksCount(post.external_links) > 0 && (
+                            <Tag color="green" style={{ marginLeft: '8px' }}>
+                              {getBunkrLinksCount(post.external_links)} 个bunkr链接
+                            </Tag>
+                          )}
+                        </Text>
+                        {/* 下载按钮 */}
+                        {post.post_id && getBunkrLinksCount(post.external_links) > 0 && (
+                          <Space>
+                            <Button
+                              type="primary"
+                              size="small"
+                              icon={<CloudDownloadOutlined />}
+                              onClick={() => downloadPostBunkrLinks(post, false)}
+                              loading={downloadingPosts.has(post.post_id)}
+                            >
+                              后台下载
+                            </Button>
+                            <Button
+                              size="small"
+                              icon={<DownloadOutlined />}
+                              onClick={() => downloadPostBunkrLinks(post, true)}
+                              loading={downloadingPosts.has(post.post_id)}
+                            >
+                              同步下载
+                            </Button>
+                          </Space>
+                        )}
+                      </div>
                       <Space wrap>
                         {post.external_links.map((link, index) => (
                           <Tag 
                             key={index} 
-                            color="cyan" 
+                            color={isBunkrLink(link) ? "orange" : "cyan"}
                             style={{ cursor: 'pointer' }}
                             onClick={() => window.open(link, '_blank')}
                           >
-                            <LinkOutlined /> 链接 {index + 1}
+                            <LinkOutlined /> 
+                            {isBunkrLink(link) ? `Bunkr ${index + 1}` : `链接 ${index + 1}`}
                           </Tag>
                         ))}
                       </Space>
+                    </div>
+                  )}
+
+                  {/* 下载按钮 - 当没有外部链接时的备用位置 */}
+                  {post.post_id && (!post.external_links || post.external_links.length === 0) && (
+                    <div style={{ marginTop: '16px', textAlign: 'center' }}>
+                      <Text type="secondary">该帖子没有外部链接可供下载</Text>
                     </div>
                   )}
                 </Card>
@@ -443,6 +588,60 @@ function ThreadDetail() {
           </div>
         )}
       </div>
+
+      {/* 下载结果模态框 */}
+      <Modal
+        title="下载结果"
+        open={showDownloadModal}
+        onCancel={() => setShowDownloadModal(false)}
+        footer={[
+          <Button key="close" onClick={() => setShowDownloadModal(false)}>
+            关闭
+          </Button>,
+        ]}
+      >
+        {downloadResults && (
+          <List
+            dataSource={downloadResults.download_results}
+            renderItem={(item) => (
+              <List.Item>
+                <List.Item.Meta
+                  title={item.url}
+                  description={
+                                         item.result.success ? (
+                       <>
+                         成功下载 {item.result.files_downloaded || 0} 个文件
+                         {item.result.downloaded_files && item.result.downloaded_files.length > 0 && (
+                           <span>（下载文件: {item.result.downloaded_files.join(', ')}）</span>
+                         )}
+                       </>
+                     ) : (
+                       <>
+                         失败: {item.result.error || '未知错误'}
+                         {item.result.files_downloaded && item.result.files_downloaded > 0 && (
+                           <span>（已下载 {item.result.files_downloaded} 个文件）</span>
+                         )}
+                       </>
+                     )
+                  }
+                />
+              </List.Item>
+            )}
+          />
+        )}
+        {downloadResults && downloadResults.errors && downloadResults.errors.length > 0 && (
+          <div style={{ marginTop: '16px' }}>
+            <Text type="danger">下载失败链接：</Text>
+            <Space wrap>
+              {downloadResults.errors.map((error, index) => (
+                <Tag key={index} color="red">
+                  {error}
+                </Tag>
+              ))}
+            </Space>
+          </div>
+        )}
+      </Modal>
     </div>
   )
 }

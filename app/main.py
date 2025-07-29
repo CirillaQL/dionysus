@@ -159,6 +159,8 @@ async def api_root():
                 "/api/docs - API文档",
                 "/api/threads - 获取线程列表",
                 "/api/threads/{thread_url} - 获取线程详情",
+                "/api/threads/download - 下载帖子bunkr链接（后台任务）",
+                "/api/threads/download-sync - 同步下载帖子bunkr链接",
                 "/api/crawler - 爬取帖子",
                 "/api/sync - 同步帖子",
                 "/api/watch - 监控帖子",
