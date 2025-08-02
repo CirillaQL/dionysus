@@ -1,15 +1,20 @@
+# 网站域名配置（用于cookies筛选）
+# 当前支持的域名变体：simpcity.cr, simpcity.su 等
+# 如果不配置，程序会自动从cookies中推断主域名
+site_domain: "simpcity.cr"
+
 cookies:
   # 从浏览器导出的cookies列表
   # 可以使用浏览器插件如"Cookie Editor"导出为JSON格式
   # 或者直接从浏览器开发者工具中复制
   # 示例格式：
-  # - domain: ".simpcity.su"
+  # - domain: ".simpcity.cr"
   #   name: "session_id"
   #   value: "your_session_id_here"
   #   path: "/"
   #   secure: true
   #   httpOnly: true
-  # - domain: "simpcity.su"
+  # - domain: "simpcity.cr"
   #   name: "user_token"
   #   value: "your_user_token_here"
   #   path: "/"

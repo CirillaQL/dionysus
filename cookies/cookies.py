@@ -220,6 +220,42 @@ class BrowserCookies:
         self._cookies.clear()
         print("已清空所有cookies")
     
+    def get_primary_domain(self) -> Optional[str]:
+        """
+        自动推断主域名（不包含子域名的根域名）
+        优先选择simpcity相关域名，然后选择cookie数量最多的域名
+        
+        Returns:
+            推断出的主域名，如果没有有效cookies则返回None
+        """
+        domain_counts = {}
+        simpcity_domains = []
+        
+        for cookie in self._cookies:
+            if not cookie.is_expired():
+                domain = cookie.domain
+                # 移除域名前的点号
+                clean_domain = domain.lstrip('.')
+                
+                # 统计各域名的cookie数量
+                domain_counts[clean_domain] = domain_counts.get(clean_domain, 0) + 1
+                
+                # 收集simpcity相关域名
+                if 'simpcity' in clean_domain.lower():
+                    if clean_domain not in simpcity_domains:
+                        simpcity_domains.append(clean_domain)
+        
+        if not domain_counts:
+            return None
+        
+        # 优先返回simpcity相关域名
+        if simpcity_domains:
+            # 返回cookie数量最多的simpcity域名
+            return max(simpcity_domains, key=lambda d: domain_counts.get(d, 0))
+        
+        # 否则返回cookie数量最多的域名
+        return max(domain_counts.keys(), key=lambda d: domain_counts[d])
+    
     def to_requests_cookies(self, domain: Optional[str] = None) -> Dict[str, str]:
         """
         转换为requests库可用的cookies格式
@@ -233,7 +269,7 @@ class BrowserCookies:
         cookies_dict = {}
         for cookie in self._cookies:
             if not cookie.is_expired():
-                if domain is None or cookie.domain == domain:
+                if domain is None or cookie.domain == domain or cookie.domain == f".{domain}":
                     cookies_dict[cookie.name] = cookie.value
         return cookies_dict
     

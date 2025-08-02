@@ -119,6 +119,7 @@ def load_cookies_from_config(config_path: str = "config.yaml") -> Dict[str, str]
         # 首先尝试从配置文件读取
         config = get_config(config_path)
         browser_cookies = config.get("cookies")
+        site_domain = config.get("site_domain")  # 从配置文件读取域名
         
         cookies_manager = BrowserCookies()
         
@@ -128,12 +129,37 @@ def load_cookies_from_config(config_path: str = "config.yaml") -> Dict[str, str]
         else:
             logger.info("配置文件中未找到cookies，尝试从浏览器cookies文件加载...")
         
-        requests_cookies = cookies_manager.to_requests_cookies("simpcity.su")
+        # 动态确定域名
+        if site_domain:
+            logger.info(f"使用配置文件中指定的域名: {site_domain}")
+            target_domain = site_domain
+        else:
+            # 自动推断主域名
+            inferred_domain = cookies_manager.get_primary_domain()
+            if inferred_domain:
+                logger.info(f"自动推断出主域名: {inferred_domain}")
+                target_domain = inferred_domain
+            else:
+                logger.warning("无法推断主域名，将使用所有域名的cookies")
+                target_domain = None
+        
+        requests_cookies = cookies_manager.to_requests_cookies(target_domain)
         
         if not requests_cookies:
-            raise ValueError("未找到任何有效的cookies")
+            available_domains = set()
+            for cookie in cookies_manager._cookies:
+                if not cookie.is_expired():
+                    available_domains.add(cookie.domain.lstrip('.'))
+            
+            error_msg = "未找到任何有效的cookies"
+            if available_domains:
+                error_msg += f"，可用域名: {', '.join(available_domains)}"
+                if target_domain:
+                    error_msg += f"，但指定域名 '{target_domain}' 没有对应的cookies"
+            
+            raise ValueError(error_msg)
         
-        logger.info(f"成功加载 {len(requests_cookies)} 个cookies")
+        logger.info(f"成功加载 {len(requests_cookies)} 个cookies（域名: {target_domain or '所有域名'}）")
         return requests_cookies
         
     except FileNotFoundError:
